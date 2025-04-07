@@ -1,0 +1,233 @@
+Metadata-Version: 2.4
+Name: vss_ctx_rag
+Version: 0.2.22rc3
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: openai<2.0.0,>=1.40.6
+Requires-Dist: langchain_core==0.3.21
+Requires-Dist: langchain==0.3.3
+Requires-Dist: langchain_community==0.3.2
+Requires-Dist: langchain_milvus==0.1.5
+Requires-Dist: langchain-openai==0.2.2
+Requires-Dist: langchain-experimental==0.3.2
+Requires-Dist: langchain-nvidia-ai-endpoints==0.3.7
+Requires-Dist: pymilvus==2.4.4
+Requires-Dist: sentence-transformers<3.0.0,>=2.7.0
+Requires-Dist: uvicorn<0.31.0,>=0.30.5
+Requires-Dist: fastapi<0.116.0,>=0.115.4
+Requires-Dist: requests<2.33.0,>=2.32.3
+Requires-Dist: jsonschema<4.23.0,>=4.22.0
+Requires-Dist: schema<0.8.0,>=0.7.7
+Requires-Dist: langchain-huggingface==0.1.0
+Requires-Dist: neo4j==5.24
+Requires-Dist: json-repair==0.30.2
+Requires-Dist: opentelemetry-sdk>=1.28.2
+Requires-Dist: opentelemetry-api>=1.28.2
+Requires-Dist: opentelemetry-exporter-otlp-proto-http>=1.28.2
+Requires-Dist: opentelemetry-instrumentation-fastapi>=0.49b2
+Requires-Dist: nvtx==0.2.10
+Requires-Dist: matplotlib==3.10.0
+
+<!--
+Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
+
+NVIDIA Corporation and its licensors retain all intellectual property
+and proprietary rights in and to this software, related documentation
+and any modifications thereto.  Any use, reproduction, disclosure or
+distribution of this software and related documentation without an express
+license agreement from NVIDIA Corporation is strictly prohibited.
+-->
+
+
+# NVIDIA Context RAG (C-RAG)
+
+C-RAG  is a flexible library designed to seamlessly integrate into existing data processing workflows to build customized RAG pipelines.
+
+## Key Features
+
+- [**Data Ingestion Service:**](https://via.gitlab-master-pages.nvidia.com/via-ctx-rag/content/features.html#data-ingestion-and-services) Add data to the RAG pipeline from a variety of sources.
+- [**Data Retrieval Service:**](https://via.gitlab-master-pages.nvidia.com/via-ctx-rag/content/features.html#retrieval-strategies) Retrieve data from the RAG pipeline using natural language queries.
+- [**Function and Tool Components:**](https://via.gitlab-master-pages.nvidia.com/via-ctx-rag/content/architecture.html#components) Easy to create custom functions and tools to support your existing workflows.
+- [**Swappable Databases:**](https://via.gitlab-master-pages.nvidia.com/via-ctx-rag/content/architecture.html) Use a variety of databases to store and retrieve data.
+- [**GraphRAG Support:**](https://via.gitlab-master-pages.nvidia.com/via-ctx-rag/content/features.html) Seamlessly extract knowledge graphs from data to support your existing workflows.
+- [**Observability:**](https://via.gitlab-master-pages.nvidia.com/via-ctx-rag/content/features.html#otel-and-metrics) Monitor and troubleshoot your workflows with any OpenTelemetry-compatible monitoring tool.
+
+
+With C-RAG, you can quickly build RAG pipelines to support your existing workflows.
+
+## Links
+
+ * [Documentation](https://via.gitlab-master-pages.nvidia.com/via-ctx-rag/index.html): Explore the full documentation for C-RAG.
+ * [C-RAG Architecture](https://via.gitlab-master-pages.nvidia.com/via-ctx-rag/content/architecture.html): Learn more about how C-RAG works and its components.
+ * [Getting Started Guide](https://via.gitlab-master-pages.nvidia.com/via-ctx-rag/content/usage/index.html): Set up your environment and start integrating C-RAG into your workflows.
+ * [Examples](https://via.gitlab-master-pages.nvidia.com/via-ctx-rag/content/usage/usage.html): Explore examples of C-RAG workflows.
+ * [Troubleshooting](https://via.gitlab-master-pages.nvidia.com/via-ctx-rag/content/troubleshooting.html): Get help with common issues.
+
+
+## Getting Started
+
+### Prerequisites
+
+Before you begin using C-RAG, ensure that you have the following software installed.
+
+- Install [Git](https://git-scm.com/)
+- Install [uv](https://docs.astral.sh/uv/getting-started/installation/)
+
+
+### Installation
+
+#### Installing from artifactory
+
+
+The wheel file is available on artifactory.
+
+```bash
+pip install vss_ctx_rag==0.2.21 --index-url https://urm.nvidia.com/artifactory/api/pypi/nv-shared-pypi/simple
+```
+
+#### Installing from source
+
+
+##### Create a virtual environment using uv
+
+```bash
+uv venv --seed .venv
+source .venv/bin/activate
+```
+
+##### Clone the repository and install the dependencies
+
+```bash
+git clone https://gitlab-master.nvidia.com/via/via-ctx-rag.git
+cd via-ctx-rag
+uv pip install -e .
+```
+
+
+## Service Example
+
+
+
+### Setting up environment variables
+
+
+Create a .env file in the root directory and set the following variables:
+
+```bash
+   NVIDIA_API_KEY=<IF USING NVIDIA>
+   NVIDIA_VISIBLE_DEVICES=<GPU ID>
+
+   OPENAI_API_KEY=<IF USING OPENAI>
+
+   VSS_CTX_PORT_RET=<DATA RETRIEVAL PORT>
+   VSS_CTX_PORT_IN=<DATA INGESTION PORT>
+```
+
+### Using docker compose
+
+```bash
+make -C docker start_compose
+```
+
+This will start the following services:
+
+
+* vss-ctx-rag-data-ingestion
+
+  * Service available at `http://<HOST>:<VSS_CTX_PORT_IN>`
+
+* vss-ctx-rag-data-retrieval
+
+  * Service available at `http://<HOST>:<VSS_CTX_PORT_RET>`
+
+* neo4j
+
+  * UI available at `http://<HOST>:7474`
+
+* milvus
+
+  * UI available at `http://<HOST>:9091`
+
+* otel-collector
+* jaeger
+
+  * UI available at `http://<HOST>:16686`
+
+* prometheus
+
+  * UI available at `http://<HOST>:9090`
+
+* cassandra
+
+To change the storage volumes, export DOCKER_VOLUME_DIRECTORY to the desired directory.
+
+### Data Ingestion Example
+
+```python
+import requests
+import json
+
+base_url = "http://<HOST>:<VSS_CTX_PORT_IN>"
+
+headers = {"Content-Type": "application/json"}
+
+### Initialize the service with a unique uuid
+init_data = {"config_path": "/app/service/config.yaml", "uuid": "1"}
+response = requests.post(
+    f"{base_url}/init", headers=headers, data=json.dumps(init_data)
+)
+
+# POST request to /add_doc to add documents to the service
+add_doc_data_list = [
+    {"document": "User1: I went hiking to Mission Peak", "doc_index": 4},
+    {
+        "document": "User1: Hi how are you?",
+        "doc_index": 0,
+        "doc_metadata": {"is_first": True},
+    },
+    {"document": "User1: I went hiking to Mission Peak", "doc_index": 4},
+    {"document": "User1: I am great too. Thanks for asking", "doc_index": 2},
+    {"document": "User2: I am good. How are you?", "doc_index": 1},
+    {"document": "User2: So what did you do over the weekend?", "doc_index": 3},
+    {
+        "document": "User3: Guys there is a fire. Let us get out of here",
+        "doc_index": 5,
+        "doc_metadata": {"is_last": True},
+    },
+]
+
+# Send POST requests for each document
+for add_doc_data in add_doc_data_list:
+    response = requests.post(
+        f"{base_url}/add_doc", headers=headers, data=json.dumps(add_doc_data)
+    )
+```
+
+### Data Retrieval Example
+
+```python
+import requests
+import json
+
+
+base_url = "http://<HOST>:<VSS_CTX_PORT_RET>"
+
+headers = {"Content-Type": "application/json"}
+
+### Initialize the service with the same uuid as the data ingestion service
+init_data = {"config_path": "/app/service/config.yaml", "uuid": "1"}
+response = requests.post(
+    f"{base_url}/init", headers=headers, data=json.dumps(init_data)
+)
+
+### Send a retrieval request to the service
+call_data = {"chat": {"question": "What happens in this situation?"}}
+
+request_data = {"state": call_data}
+
+response = requests.post(
+    f"{base_url}/call", headers=headers, data=json.dumps(request_data)
+)
+print(response.json()["result"])
+
+```

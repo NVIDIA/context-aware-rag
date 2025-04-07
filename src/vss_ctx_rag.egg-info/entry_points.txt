@@ -1,0 +1,4 @@
+[aiq.components]
+aiq_vss_ctx_rag_ingestion = vss_ctx_rag.aiq.register_in
+aiq_vss_ctx_rag_retrieval = vss_ctx_rag.aiq.register_ret
+aiq_vss_ctx_rag_tool_call_workflow = vss_ctx_rag.aiq.workflow.register_tool_call_workflow
