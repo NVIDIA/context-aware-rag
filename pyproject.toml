@@ -1,0 +1,80 @@
+# SPDX-FileCopyrightText: Copyright (c) 2024-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+[project]
+name = "vss_ctx_rag"
+version = "0.5.0-rc10"
+description = ""
+readme = "README.md"
+requires-python = ">=3.10"
+license-files = ["LICENSE", "LICENSE.3rdparty"]
+dependencies = [
+  "openai>=1.68.2,<2.0.0",
+  "langchain_core==0.3.21",
+  "langchain==0.3.3",
+  "langchain_community==0.3.2",
+  "langchain_milvus==0.1.5",
+  "langchain-openai==0.2.2",
+  "langchain-experimental==0.3.2",
+  "langchain-nvidia-ai-endpoints==0.3.7",
+  "pymilvus==2.4.4",
+  "pydantic==2.10.6",
+  "uvicorn>=0.30.5,<0.31.0",
+  "fastapi>=0.115.4,<0.116.0",
+  "requests>=2.32.3,<2.33.0",
+  "jsonschema>=4.22.0,<4.23.0",
+  "schema>=0.7.7,<0.8.0",
+  "neo4j==5.24",
+  "json-repair==0.30.2",
+  "opentelemetry-sdk>=1.28.2",
+  "opentelemetry-api>=1.28.2",
+  "opentelemetry-exporter-otlp-proto-http>=1.28.2",
+  "opentelemetry-instrumentation-fastapi>=0.49b2",
+  "nvtx==0.2.10",
+  "matplotlib==3.10.0"
+]
+
+[project.entry-points."aiq.components"]
+aiq_vss_ctx_rag_ingestion = "vss_ctx_rag.aiq.register_in"
+aiq_vss_ctx_rag_retrieval = "vss_ctx_rag.aiq.register_ret"
+aiq_vss_ctx_rag_tool_call_workflow = "vss_ctx_rag.aiq.workflow.register_tool_call_workflow"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["vss_ctx_rag*"]
+
+[tool.setuptools_scm]
+# intentionally empty, the section is required for setuptools_scm to work but we don't need to set anything
+
+[tool.setuptools.package-data]
+"vss_ctx_rag" = ["data/*"]
+
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project.optional-dependencies]
+docs = [
+  "ipython~=8.31",
+  "myst-parser~=4.0",
+  "nbsphinx~=0.9",
+  "nvidia-sphinx-theme>=0.0.7",
+  "sphinx~=8.2",
+  "sphinx-copybutton>=0.5",
+  "sphinx-autoapi>=3.6",
+  "vale==3.9.5",
+  "setuptools-scm>=8.1.0",
+  "sphinxcontrib-mermaid>=1.0.0"
+]

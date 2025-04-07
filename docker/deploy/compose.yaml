@@ -1,0 +1,60 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+include:
+  - telemetry.yaml
+  - storage.yaml
+
+services:
+  vss-ctx-rag-retriever:
+    image: vss_ctx_rag-${USER}
+    container_name: vss-ctx-rag-retriever
+    ports:
+      - ${VSS_CTX_PORT_RET:-8000}:8000
+    environment:
+      - MILVUS_HOST=milvus-standalone
+      - MILVUS_PORT=19530
+      - GRAPH_DB_URI=bolt://neo4j:7687
+      - GRAPH_DB_USERNAME=neo4j
+      - GRAPH_DB_PASSWORD=password
+      - NVIDIA_API_KEY=${NVIDIA_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - VIA_CTX_RAG_ENABLE_RET=true
+      - VIA_CTX_RAG_ENABLE_OTEL=true
+      - VIA_CTX_RAG_EXPORTER=otlp
+      - VIA_CTX_RAG_OTEL_ENDPOINT=http://otel_collector:4318
+
+  vss-ctx-rag-data-ingestion:
+    image: vss_ctx_rag-${USER}
+    container_name: vss-ctx-rag-data-ingestion
+    ports:
+      - ${VSS_CTX_PORT_IN:-8001}:8000
+    environment:
+      - MILVUS_HOST=milvus-standalone
+      - MILVUS_PORT=19530
+      - GRAPH_DB_URI=bolt://neo4j:7687
+      - GRAPH_DB_USERNAME=neo4j
+      - GRAPH_DB_PASSWORD=password
+      - NVIDIA_API_KEY=${NVIDIA_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - VIA_CTX_RAG_ENABLE_OTEL=true
+      - VIA_CTX_RAG_EXPORTER=otlp
+      - VIA_CTX_RAG_OTEL_ENDPOINT=http://otel_collector:4318
+      - VIA_CTX_RAG_ENABLE_DEV=${VIA_CTX_RAG_ENABLE_DEV:-false}
+
+
+networks:
+  default:
+    name: vss-ctx-rag-${USER}
