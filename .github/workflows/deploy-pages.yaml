@@ -35,6 +35,9 @@ jobs:
           path: docs/build/html
 
   deploy:
+    permissions:
+      id-token: write
+      pages: write
     if: ${{ github.ref == 'refs/heads/main' }}
     environment:
       name: github-pages
