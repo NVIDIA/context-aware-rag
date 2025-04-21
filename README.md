@@ -35,7 +35,7 @@ With Context Aware RAG, you can quickly build RAG pipelines to support your exis
 
 ## Links
 
- * [Documentation](https://nvidia.github.io/context-aware-rag/index.html): Explore the full documentation for Context Aware RAG.
+ * [Documentation](https://nvidia.github.io/context-aware-rag): Explore the full documentation for Context Aware RAG.
  * [Context Aware RAG Architecture](https://nvidia.github.io/context-aware-rag/overview/architecture.html): Learn more about how Context Aware RAG works and its components.
  * [Getting Started Guide](https://nvidia.github.io/context-aware-rag/guides/index.html): Set up your environment and start integrating Context Aware RAG into your workflows.
  * [Examples](https://nvidia.github.io/context-aware-rag/guides/library.html#document-ingestion): Explore examples of Context Aware RAG workflows.
