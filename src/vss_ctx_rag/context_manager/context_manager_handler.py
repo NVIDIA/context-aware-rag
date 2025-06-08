@@ -54,7 +54,7 @@ from vss_ctx_rag.functions.rag.graph_rag.graph_retrieval_func import GraphRetrie
 from vss_ctx_rag.functions.rag.vector_rag.vector_retrieval_func import (
     VectorRetrievalFunc,
 )
-from vss_ctx_rag.utils.utils import RequestInfo
+from vss_ctx_rag.utils.utils import RequestInfo, is_openai_model
 
 
 class ContextManagerHandler:
@@ -165,7 +165,7 @@ class ContextManagerHandler:
         notification_config = config.get("notification")
         if notification_config and notification_config.get("enable"):
             notification_llm_params = notification_config.get("llm")
-            if notification_llm_params["model"] == "gpt-4o":
+            if is_openai_model(notification_llm_params["model"]):
                 api_key = os.environ["OPENAI_API_KEY"]
             else:
                 api_key = config["api_key"]
@@ -194,7 +194,7 @@ class ContextManagerHandler:
             if chat_config
             else DEFAULT_LLM_PARAMS
         )
-        if chat_llm_params["model"] == "gpt-4o":
+        if is_openai_model(chat_llm_params["model"]):
             api_key = os.environ["OPENAI_API_KEY"]
         else:
             api_key = config["api_key"]
@@ -203,7 +203,7 @@ class ContextManagerHandler:
         # Init time Summarization config
         summ_config = copy.deepcopy(config.get("summarization"))
         llm_params = summ_config.get(LLM_TOOL_NAME, DEFAULT_LLM_PARAMS)
-        if llm_params["model"] == "gpt-4o":
+        if is_openai_model(llm_params["model"]):
             api_key = os.environ["OPENAI_API_KEY"]
         else:
             api_key = config["api_key"]
