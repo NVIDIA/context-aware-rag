@@ -107,8 +107,8 @@ def is_openai_model(model_name: str) -> bool:
     if any(model.startswith(prefix) for prefix in openai_prefixes):
         return True
 
-    # Matches o models like "o1", "o1-preview", "o3-mini", "01" etc.
-    if re.match(r"^[o0]\d", model):
+    # Matches o models like "o1", "o1-preview", "o3-mini", "04-mini" etc.
+    if re.match(r"^[o]\d", model):
         return True
 
     return False
