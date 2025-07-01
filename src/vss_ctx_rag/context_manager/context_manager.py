@@ -52,10 +52,12 @@ class ContextManagerProcess(mp_ctx.Process):
         logger.info(f"Initializing Context Manager Process no.: {process_index}")
         super().__init__()
         self._lock = mp_ctx.Lock()
+        self._pending_requests_lock = mp_ctx.Lock()
         self._queue = mp_ctx.Queue()
         self._response_queue = mp_ctx.Queue()
         self._stop = mp_ctx.Event()
         self._pending_add_doc_requests = []
+        self._request_start_times = {}
         self.config = config
         self.process_index = process_index
         self.req_info = req_info
@@ -139,35 +141,40 @@ class ContextManagerProcess(mp_ctx.Process):
                             ),
                             self.event_loop,
                         )
-                        self._pending_add_doc_requests.append(future)
-                        future.add_done_callback(self._pending_add_doc_requests.remove)
+                        self._add_pending_request(future)
                     elif item and "reset" in item:
                         state = item["reset"]
                         with TimeMeasure("context_manager/reset", "green"):
                             stop_time = time.time() + WAIT_ON_PENDING
-                            while len(self._pending_add_doc_requests) and (
-                                time.time() < stop_time
-                            ):
+                            while True:
+                                with self._pending_requests_lock:
+                                    pending_count = len(self._pending_add_doc_requests)
+                                    if not pending_count or time.time() >= stop_time:
+                                        break
+
                                 time.sleep(2)
                                 logger.info(
-                                    "Completing pending requests..."
-                                    f"{len(self._pending_add_doc_requests)}"
+                                    f"Completing pending requests...{pending_count}"
                                 )
-                                logger.info(f"{self._pending_add_doc_requests}")
 
-                            self._pending_add_doc_requests = []
+                            with self._pending_requests_lock:
+                                self._pending_add_doc_requests = []
                             future = asyncio.run_coroutine_threadsafe(
                                 self.cm_handler.areset(state), loop=self.event_loop
                             )
                             future.result()
                     elif item and "call" in item:
-                        with TimeMeasure("context_manager/call", "blue"):
+                        with TimeMeasure("context_manager/call-manager", "blue"):
                             # TODO: Wait for add docs to finish
                             with TimeMeasure(
                                 "context_manager/call/pending_add_doc", "blue"
                             ):
+                                with self._pending_requests_lock:
+                                    pending_requests_copy = (
+                                        self._pending_add_doc_requests.copy()
+                                    )
                                 done, not_done = concurrent.futures.wait(
-                                    self._pending_add_doc_requests
+                                    pending_requests_copy
                                 )
                                 # Check each completed future for exceptions
                                 for future in done:
@@ -202,6 +209,28 @@ class ContextManagerProcess(mp_ctx.Process):
         except Exception as e:
             logger.error("Exception %s", str(e))
             logger.error(traceback.format_exc())
+
+    def _add_pending_request(self, future):
+        with self._pending_requests_lock:
+            self._pending_add_doc_requests.append(future)
+            self._request_start_times[id(future)] = time.time()
+            future.add_done_callback(self._remove_pending_request)
+
+    def _remove_pending_request(self, future):
+        with self._pending_requests_lock:
+            try:
+                self._pending_add_doc_requests.remove(future)
+                # Calculate and log processing time
+                future_id = id(future)
+                if future_id in self._request_start_times:
+                    start_time = self._request_start_times.pop(future_id)
+                    duration = time.time() - start_time
+                    logger.debug(f"Document processing completed in {duration:.3f}s")
+            except ValueError:
+                logger.error(
+                    f"Attempted to remove future that was already removed: {future}"
+                )
+                pass  # Already removed
 
     def add_doc(
         self,

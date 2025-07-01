@@ -97,11 +97,11 @@ class GraphRetrieval:
                 index_name=index_name,
                 retrieval_query=retrieval_query,
                 graph=self.graph_db.graph_db,
-                search_type="hybrid",
+                search_type="hybrid" if self.multi_channel else "vector",
                 node_label=node_label,
                 embedding_node_property=embedding_node_property,
                 text_node_properties=text_node_properties,
-                keyword_index_name=keyword_index,
+                keyword_index_name=keyword_index if self.multi_channel else None,
             )
             logger.info(
                 f"Successfully retrieved Neo4jVector Fulltext index '{index_name}' and keyword index '{keyword_index}'"
@@ -126,6 +126,9 @@ class GraphRetrieval:
                     search_kwargs={
                         "k": search_k,
                         "score_threshold": CHAT_SEARCH_KWARG_SCORE_THRESHOLD,
+                        "filter": {"uuid": self.uuid}
+                        if not self.multi_channel
+                        else None,
                         "params": {"uuid": self.uuid}
                         if not self.multi_channel
                         else {"uuid": None},

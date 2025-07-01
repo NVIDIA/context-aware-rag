@@ -15,10 +15,10 @@
 
 [project]
 name = "vss_ctx_rag"
-version = "0.5.0"
+version = "0.5.1"
 description = ""
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license-files = ["LICENSE", "LICENSE.3rdparty"]
 dependencies = [
   "openai>=1.68.2,<2.0.0",
@@ -45,6 +45,9 @@ dependencies = [
   "nvtx==0.2.10",
   "matplotlib==3.10.0"
 ]
+
+[tool.uv]
+managed = true
 
 [project.entry-points."aiq.components"]
 aiq_vss_ctx_rag_ingestion = "vss_ctx_rag.aiq.register_in"

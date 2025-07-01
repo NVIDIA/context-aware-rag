@@ -40,7 +40,10 @@ from vss_ctx_rag.functions.rag.graph_rag.constants import (
     HYBRID_SEARCH_FULL_TEXT_QUERY,
     FILTER_LABELS,
 )
-from vss_ctx_rag.utils.globals import DEFAULT_EMBEDDING_PARALLEL_COUNT
+from vss_ctx_rag.utils.globals import (
+    DEFAULT_EMBEDDING_PARALLEL_COUNT,
+    DEFAULT_CONCURRENT_EMBEDDING_LIMIT,
+)
 
 
 class GraphExtraction:
@@ -73,6 +76,9 @@ class GraphExtraction:
         self.previous_chunk_id = 0
         self.last_position = 0
         self.embedding_parallel_count = embedding_parallel_count
+        self._embedding_semaphore = asyncio.Semaphore(
+            DEFAULT_CONCURRENT_EMBEDDING_LIMIT
+        )
 
     def handle_backticks_nodes_relationship_id_type(
         self, graph_document_list: List[GraphDocument]
@@ -136,11 +142,14 @@ class GraphExtraction:
         ):
             data_for_query = []
             logger.info("update embedding and vector index for chunks")
+
+            async def semaphore_controlled_embed(content):
+                async with self._embedding_semaphore:
+                    return await self.graph_db.embeddings.aembed_query(content)
+
             tasks = [
                 asyncio.create_task(
-                    self.graph_db.embeddings.aembed_query(
-                        row["chunk_doc"].source.page_content
-                    )
+                    semaphore_controlled_embed(row["chunk_doc"].source.page_content)
                 )
                 for row in chunkId_chunkDoc_list
             ]
@@ -465,8 +474,13 @@ class GraphExtraction:
     async def update_embeddings(self, rows):
         with TimeMeasure("GraphExtraction/UpdatEmbding", "yellow"):
             logger.info("update embedding for entities")
+
+            async def semaphore_controlled_embed(text):
+                async with self._embedding_semaphore:
+                    return await self.graph_db.embeddings.aembed_query(text)
+
             tasks = [
-                asyncio.create_task(self.graph_db.embeddings.aembed_query(row["text"]))
+                asyncio.create_task(semaphore_controlled_embed(row["text"]))
                 for row in rows
             ]
             results = await asyncio.gather(*tasks)
@@ -531,6 +545,7 @@ class GraphExtraction:
             ]
             combined_chunk_document_list = self.get_combined_chunks(docs)
 
+            graph_documents = []
             with TimeMeasure("GraphRAG/aprocess-doc/graph-create/convert", "blue"):
                 graph_documents = await self.transformer.aconvert_to_graph_documents(
                     combined_chunk_document_list

@@ -24,6 +24,9 @@ from vss_ctx_rag.context_manager.context_manager_models import (
     AlertConfig,
 )
 from typing import Dict, Any, Optional
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+import asyncio
+from vss_ctx_rag.utils.ctx_rag_logger import TimeMeasure
 
 
 def validate_config_json(parsed_yaml, schema_json_filepath):
@@ -151,3 +154,132 @@ def validate_config(config: Dict[str, Any]) -> None:
     )
     logger.warn(error_msg)
     raise ValueError(error_msg)
+
+
+async def call_token_safe(input_data, pipeline, retries_left):
+    """
+    Unified function to handle token limit errors for both text and batch processing
+
+    TODO: Currently no attributes/APIs for checking the token limit.
+    This function is a temporary solution to handle the token limit error.
+    """
+    try:
+        return await pipeline.ainvoke(input_data)
+    except Exception as e:
+        if (
+            "exceeds maximum input length" not in str(e).lower()
+            and "please reduce the length of the messages" not in str(e).lower()
+        ):
+            raise e
+
+        logger.warning(f"Received token exceeds limit error from pipeline : {e}")
+
+        if retries_left <= 0:
+            logger.debug("Maximum recursion depth exceeded. Returning input as is.")
+            return input_data
+
+        if isinstance(input_data, str):
+            # Handle text processing (batch_token_safe logic)
+            text_splitter = RecursiveCharacterTextSplitter(
+                chunk_size=max(1, len(input_data) // 2),
+                chunk_overlap=50,
+                length_function=len,
+                is_separator_regex=False,
+            )
+
+            chunks = text_splitter.split_text(input_data)
+            first_half, second_half = chunks[0], chunks[1]
+
+            logger.info(
+                f"Text exceeds token length. Splitting into "
+                f"two parts of lengths {len(first_half)} and {len(second_half)}."
+            )
+
+            tasks = [
+                call_token_safe(first_half, pipeline, retries_left - 1),
+                call_token_safe(second_half, pipeline, retries_left - 1),
+            ]
+            summaries = await asyncio.gather(*tasks)
+            combined_summary = "\n".join(summaries)
+
+            try:
+                return await pipeline.ainvoke(combined_summary)
+            except Exception:
+                logger.debug(
+                    "Error after combining summaries, returning combined summary."
+                )
+                return combined_summary
+        elif isinstance(input_data, list):
+            # Handle batch processing (aggregate_token_safe logic)
+            if len(input_data) == 1:
+                with TimeMeasure("OffBatSumm/BaseCase", "yellow"):
+                    logger.debug("Base Case, batch size = 1")
+                    text = input_data[0]
+                    text_splitter = RecursiveCharacterTextSplitter(
+                        chunk_size=max(1, len(text) // 2),
+                        chunk_overlap=50,
+                        length_function=len,
+                        is_separator_regex=False,
+                    )
+
+                    chunks = text_splitter.split_text(text)
+                    first_half, second_half = chunks[0], chunks[1]
+
+                    logger.debug(
+                        f"Text exceeds token length. Splitting into "
+                        f"two parts of lengths {len(first_half)} and {len(second_half)}."
+                    )
+
+                    tasks = [
+                        call_token_safe([first_half], pipeline, retries_left - 1),
+                        call_token_safe([second_half], pipeline, retries_left - 1),
+                    ]
+                    summaries = await asyncio.gather(*tasks)
+                    combined_summary = "\n".join(summaries)
+
+                    try:
+                        aggregated = await pipeline.ainvoke([combined_summary])
+                        return aggregated
+                    except Exception:
+                        logger.debug(
+                            "Error after combining summaries, retrying with combined summary."
+                        )
+                        return await call_token_safe(
+                            [combined_summary], pipeline, retries_left - 1
+                        )
+            else:
+                midpoint = len(input_data) // 2
+                first_batch = input_data[:midpoint]
+                second_batch = input_data[midpoint:]
+
+                logger.debug(
+                    f"Batch size {len(input_data)} exceeds token length. "
+                    f"Splitting into two batches of sizes {len(first_batch)} and {len(second_batch)}."
+                )
+
+                tasks = [
+                    call_token_safe(first_batch, pipeline, retries_left - 1),
+                    call_token_safe(second_batch, pipeline, retries_left - 1),
+                ]
+                results = await asyncio.gather(*tasks)
+
+                combined_results = []
+                for result in results:
+                    if isinstance(result, list):
+                        combined_results.extend(result)
+                    else:
+                        combined_results.append(result)
+
+                try:
+                    with TimeMeasure("OffBatSumm/CombindAgg", "red"):
+                        aggregated = await pipeline.ainvoke(combined_results)
+                        return aggregated
+                except Exception:
+                    logger.debug(
+                        "Error after combining batch summaries, retrying with combined summaries."
+                    )
+                    return await call_token_safe(
+                        combined_results, pipeline, retries_left - 1
+                    )
+        else:
+            raise ValueError(f"Unsupported input_data type: {type(input_data)}")

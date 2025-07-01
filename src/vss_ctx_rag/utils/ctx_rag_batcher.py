@@ -15,6 +15,7 @@
 
 from typing import Optional
 from collections import defaultdict
+import threading
 from vss_ctx_rag.utils.ctx_rag_logger import logger, TimeMeasure
 
 
@@ -63,7 +64,7 @@ class Batch:
 
         self._batch[doc_i] = (doc, doc_i, doc_meta)
 
-        if doc_meta["is_last"]:
+        if doc_meta and doc_meta.get("is_last", False):
             self._is_last = True
 
         if len(self._batch) == self._batch_size:
@@ -110,6 +111,7 @@ class Batcher:
         logger.info("Setting up Batcher with batch size %d", batch_size)
         self.batch_size = batch_size
         self.batches = defaultdict(lambda: Batch(self.batch_size))
+        self._lock = threading.Lock()
 
     def add_doc(self, doc: str, doc_i: int, doc_meta: Optional[dict] = None):
         """
@@ -120,12 +122,14 @@ class Batcher:
             doc_meta (Optional[dict], optional): Additional metadata for the document.
                                                 Defaults to None.
         Returns:
-            bool: True if the batch is full, None otherwise.
+            Batch: The batch that the document was added to
         """
         with TimeMeasure("Add Doc", "green"):
             logger.info(f"adding {doc_i} to batch")
-            self.batches[doc_i // self.batch_size].add_doc(doc, doc_i, doc_meta)
-            return self.batches[doc_i // self.batch_size]
+            with self._lock:
+                batch = self.batches[doc_i // self.batch_size]
+                batch.add_doc(doc, doc_i, doc_meta)
+                return batch
 
     def get_batch(self, doc_i: Optional[int] = None, batch_i: Optional[int] = None):
         """
@@ -137,31 +141,35 @@ class Batcher:
             Batch or None: The batch of documents if the document index is present in the batch,
                            otherwise None.
         """
-        if batch_i is None:
-            batch_i = doc_i // self.batch_size
-        batch = self.batches[batch_i]
-        if doc_i is not None:
-            if batch.has(doc_i):
+        with self._lock:
+            if batch_i is None:
+                batch_i = doc_i // self.batch_size
+            batch = self.batches[batch_i]
+            if doc_i is not None:
+                if batch.has(doc_i):
+                    return batch
+                return None
+            else:
                 return batch
-            return None
-        else:
-            return batch
 
     def get_all_batches(self):
-        batches = []
-        for i, batch in self.batches.items():
-            batches.extend(batch.as_list())
-        return batches
+        with self._lock:
+            batches = []
+            for i, batch in self.batches.items():
+                batches.extend(batch.as_list())
+            return batches
 
     def get_batch_index(self, doc_i):
         return doc_i // self.batch_size
 
     def __str__(self):
-        print_val = ""
-        for i, batch in self.batches.items():
-            print_val += "batch " + str(i) + ": " + str(batch.as_list()) + "\n"
-        return print_val
+        with self._lock:
+            print_val = ""
+            for i, batch in self.batches.items():
+                print_val += "batch " + str(i) + ": " + str(batch.as_list()) + "\n"
+            return print_val
 
     def flush(self):
-        for batch in self.batches.values():
-            batch.flush()
+        with self._lock:
+            for batch in self.batches.values():
+                batch.flush()

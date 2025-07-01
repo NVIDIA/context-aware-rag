@@ -55,6 +55,7 @@ from vss_ctx_rag.functions.rag.vector_rag.vector_retrieval_func import (
     VectorRetrievalFunc,
 )
 from vss_ctx_rag.utils.utils import RequestInfo
+from vss_ctx_rag.utils.globals import DEFAULT_CONCURRENT_DOC_PROCESSING_LIMIT
 
 
 class ContextManagerHandler:
@@ -101,6 +102,9 @@ class ContextManagerHandler:
         self.neo4j_password = None
         self.neo4jDB: Neo4jGraphDB = None
         self.configure_init(config, req_info)
+        self._doc_processing_semaphore = asyncio.Semaphore(
+            DEFAULT_CONCURRENT_DOC_PROCESSING_LIMIT
+        )
 
     def setup_neo4j(self, chat_config: Dict):
         try:
@@ -397,6 +401,7 @@ class ContextManagerHandler:
 
     def add_function(self, f: Function):
         assert f.name not in self._functions, str(self._functions)
+        logger.debug(f"Adding function: {f.name}")
         self._functions[f.name] = f
         return self
 
@@ -460,16 +465,22 @@ class ContextManagerHandler:
         elif doc_i is None:
             raise ValueError("Param doc_i missing.")
 
-        # Process document through all functions
-        tasks = []
-        with TimeMeasure("context_manager/aprocess_doc", "yellow"):
-            for _, f in self._functions.items():
-                tasks.append(
-                    asyncio.create_task(
-                        f.aprocess_doc_(doc, doc_i, doc_meta), name=f.name
+        # Process document through all functions with semaphore control
+        async with self._doc_processing_semaphore:
+            tasks = []
+
+            async def timed_function_call(func, doc, doc_i, doc_meta):
+                with TimeMeasure(f"context_manager/aprocess_doc/{func.name}", "yellow"):
+                    return await func.aprocess_doc_(doc, doc_i, doc_meta)
+
+            with TimeMeasure("context_manager/aprocess_doc/total", "green"):
+                for _, f in self._functions.items():
+                    tasks.append(
+                        asyncio.create_task(
+                            timed_function_call(f, doc, doc_i, doc_meta), name=f.name
+                        )
                     )
-                )
-            return await asyncio.gather(*tasks)
+                return await asyncio.gather(*tasks)
 
     async def call(self, state):
         """Execute registered functions with the given state.
@@ -480,12 +491,17 @@ class ContextManagerHandler:
             Dictionary containing results from all function executions
         """
         results = {}
-        with TimeMeasure("context_manager/call", "green"):
+
+        async def timed_call(func_name, call_params):
+            with TimeMeasure(f"context_manager/call/{func_name}", "green"):
+                return await self._functions[func_name](call_params)
+
+        with TimeMeasure("context_manager/call-handler/total", "blue"):
             tasks = []
             task_results = []
             for func, call_params in state.items():
                 tasks.append(
-                    asyncio.create_task(self._functions[func](call_params), name=func)
+                    asyncio.create_task(timed_call(func, call_params), name=func)
                 )
             task_results = await asyncio.gather(*tasks)
             for index, func in enumerate(state):
