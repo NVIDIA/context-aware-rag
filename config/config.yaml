@@ -45,7 +45,7 @@ chat:
     show_snippets: true
     snippet_length: 200
   params:
-    batch_size: 15
+    batch_size: 9
     top_k: 25
   llm:
     model: meta/llama-3.1-70b-instruct
