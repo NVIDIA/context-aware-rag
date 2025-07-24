@@ -14,7 +14,7 @@
 # limitations under the License.
 ---
 summarization:
-  enable: false
+  enable: true
   method: "batch"
   llm:
     model: meta/llama-3.1-70b-instruct
@@ -29,9 +29,9 @@ summarization:
     batch_size: 5
     batch_max_concurrency: 20
   prompts:
-    caption: "Write a concise and clear dense caption for the provided warehouse video, focusing on irregular or hazardous events such as boxes falling, workers not wearing PPE, workers falling, workers taking photographs, workers chitchatting, forklift stuck, etc. Start and end each sentence with a time stamp."
-    caption_summarization: "You should summarize the following events of a warehouse in the format start_time:end_time:caption. For start_time and end_time use . to seperate seconds, minutes, hours. If during a time segment only regular activities happen, then ignore them, else note any irregular activities in detail. The output should be bullet points in the format start_time:end_time: detailed_event_description. Don't return anything else except the bullet points."
-    summary_aggregation: "You are a warehouse monitoring system. Given the caption in the form start_time:end_time: caption, Aggregate the following captions in the format start_time:end_time:event_description. If the event_description is the same as another event_description, aggregate the captions in the format start_time1:end_time1,...,start_timek:end_timek:event_description. If any two adjacent end_time1 and start_time2 is within a few tenths of a second, merge the captions in the format start_time1:end_time2. The output should only contain bullet points.  Cluster the output into Unsafe Behavior, Operational Inefficiencies, Potential Equipment Damage and Unauthorized Personnel"
+    caption: "Write a concise and clear dense caption for the provided radio transcript."
+    caption_summarization: "You should summarize the radio transcripts in the format start_time:end_time:caption. For start_time and end_time use . to seperate seconds, minutes, hours. Just provide a summary of the topics of conversation, the output should be bullet points in the format start_time:end_time: detailed_event_description. Don't return anything else except the bullet points."
+    summary_aggregation: "You are a radio transcription monitoring system. Given the transcript in the form start_time:end_time: caption, Aggregate the following transcripts in the format start_time:end_time:event_description. If the event_description is the same as another event_description, aggregate the captions in the format start_time1:end_time1,...,start_timek:end_timek:event_description. If any two adjacent end_time1 and start_time2 is within a few tenths of a second, merge the transcripts in the format start_time1:end_time2. The output should only contain bullet points."
 
 chat:
   rag: graph-rag # graph-rag or vector-rag
