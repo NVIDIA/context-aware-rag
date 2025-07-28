@@ -98,7 +98,7 @@ services:
     volumes:
       - '${DOCKER_VOLUME_DIRECTORY:-.}/volumes/volumes_grafana:/var/lib/grafana'
     healthcheck:
-      test: curl -f http://localhost:3001/api/health || exit 1
+      test: curl -f http://localhost:3000/api/health || exit 1
       interval: 10s
       timeout: 120s
       retries: 60
