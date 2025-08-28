@@ -31,7 +31,7 @@ retrieval:
 -   **Data Retrieval Service**:
     -   Focuses on extracting the relevant context in response to user
         queries.
-    -   Leverages Graph-RAG and Vector-RAG functions to deliver precise,
+    -   Leverages Graph-RAG, Vector-RAG or Foundation-RAG functions to deliver precise,
         context-aware answers.
 
 ## Ingestion Strategies
@@ -102,6 +102,48 @@ approaches:
                 `config/config.yaml` file. By default, it is set to
                 `false`.
 
+    - **Database Support**: GraphRAG is compatible with Neo4j and ArangoDB databases for graph storage and retrieval.
+
+-   **Chain-of-Thought Retrieval (COT)**
+    -   **Enhanced Reasoning**: Builds upon GraphRAG by adding chain-of-thought reasoning capabilities to improve query understanding and response quality.
+    -   **Graph-Based Foundation**: Uses the same graph extraction and storage approach as GraphRAG with Neo4j or ArangoDB databases.
+    -   **Reasoning Process**: For a given query, the system performs multi-step reasoning over the graph structure, considering entity relationships and context to generate more comprehensive answers.
+    -   **Vision Language Model Integration**: Could incorporate a separate VLM (like GPT-4o) alongside the main LLM for enhanced reasoning capabilities.
+    -   **Database Compatibility**: Works with Neo4j and ArangoDB databases.
+
+-   **Chain-of-Thought Retrieval with Vision Language Model (VLM)**
+    -   **Visual Understanding**: Enables visual understanding capabilities for image-based retrieval and analysis.
+    -   **Graph-Based Storage**: Uses graph databases (Neo4j/ArangoDB) to store entities, relationships, and visual content metadata.
+    -   **Image Processing**: Integrates with image fetching services (MinIO) to retrieve and analyze visual content during query processing.
+    -   **Multimodal Model Architecture**: Combines a standard LLM for text processing with a specialized VLM for visual understanding.
+
+-   **Foundation-RAG (FRAG)**
+    -   **Enhanced Vector Retrieval**: Provides advanced vector-based retrieval with Nvidia-RAG blueprint built on top of VectorRAG.
+    -   **Vector Database Support**: Compatible with the Milvus vector database.
+    -   **Reranking Integration**: Incorporates NVIDIA reranker models for improved result relevance.
+
+-   **Advanced Graph Retrieval with Planning and VLM (Planner)**
+    -   **Advanced Graph Retrieval**: Uses `adv_graph_retrieval` type for sophisticated multi-step query processing and iterative search.
+    -   **Planning Capabilities**: Incorporates planning algorithms to break down complex queries into manageable sub-tasks.
+    -   **Tool Integration**: Supports multiple retrieval tools including:
+        -   `chunk_search`: For finding relevant document chunks
+        -   `chunk_filter`: For filtering results based on criteria
+        -   `entity_search`: For searching generated graph entities
+        -   `chunk_reader`: For detailed content analysis which uses VLM over extracted chunk's frames and captions
+    -   **Multi-Modal Support**: Combines graph databases or vector databases, LLMs, and VLMs for comprehensive information retrieval.
+    -   **Database Flexibility**: Works with Neo4j and ArangoDB databases.
+
+## Database Backend Support
+
+CA-RAG supports multiple database backends for different retrieval strategies:
+
+-   **Milvus**: Vector database optimized for VectorRAG and Foundation-RAG
+-   **Elasticsearch**: Alternative vector database for VectorRAG
+-   **Neo4j**: Graph database for GraphRAG, COT, VLM, and Planner strategies
+-   **ArangoDB**: Alternative graph database for GraphRAG, COT, VLM, and Planner strategies
+
+Each retrieval strategy can be configured with appropriate database backends as shown in the compatibility matrix in the [Advanced Setup Guide](../intro/advanced-setup.md).
+
 ## Summarization
 
 The summarization feature allows users to summarize documents.
@@ -111,6 +153,8 @@ Context Aware RAG provides the following methods for summarizing content.
 - Batch: This method performs summarization in two stages:
     - Batching: Groups together documents into batches and generates summaries for each batch.
     - Aggregation: Combines batch summaries using a secondary prompt (summary_aggregation).
+- Offline Summarization: Batch summarization summarizes as a batch of documents as soon as the batch is full while still receiving documents. Offline summarization on the other hand, summarizes the batches only when the user requests for it.
+- Summary Retriever: Retrieves documents between given start and end times and summarizes it based on the configured prompt.
 
 ## Alerts
 

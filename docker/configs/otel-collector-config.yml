@@ -18,9 +18,12 @@ receivers:
     protocols:
       http:
         endpoint: 0.0.0.0:4318
+      grpc:
+        endpoint: 0.0.0.0:4317
+
 exporters:
-  otlphttp:
-    endpoint: http://jaeger:4318
+  otlp:
+    endpoint: phoenix:4317
     tls:
       insecure: true
   prometheus:
@@ -30,7 +33,7 @@ service:
   pipelines:
     traces:
       receivers: [otlp]
-      exporters: [otlphttp]
+      exporters: [otlp]
     metrics:
       receivers: [otlp]
       exporters: [prometheus]

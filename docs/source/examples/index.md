@@ -18,7 +18,7 @@ limitations under the License.
 # Examples
 
 
-This section contains comprehensive examples for using the Context-Aware RAG system. Each guide focuses on a specific usage on the Context-Aware RAG functionality.
+This section contains comprehensive examples for using the Context-Aware RAG system. Each guide focuses on a specific aspect of the Context-Aware RAG functionality.
 
 ## Available Guides
 
@@ -27,7 +27,7 @@ This section contains comprehensive examples for using the Context-Aware RAG sys
    - Configure system parameters and settings
    - Understand the initialization process
 
-2. [AIQ Example](./aiq_ex.md)
+2. [NAT Example](./nat_ex.md)
    - Add documents to the system
    - Understand document structure and metadata requirements
    - Learn best practices for document ingestion
@@ -38,5 +38,5 @@ This section contains comprehensive examples for using the Context-Aware RAG sys
 :maxdepth: 2
 
 PDF Q&A <./pdf_qna.md>
-AIQ (Alpha) <./aiq_ex.md>
+NAT <./nat_ex.md>
 ```

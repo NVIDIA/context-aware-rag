@@ -23,15 +23,51 @@ The `Function` class serves as a base class for all functions in Context Manager
 
 ## Creating a Custom Function
 
-To create a custom function, you need to inherit from the `Function` class and implement the abstract methods `setup`, `acall`, and `aprocess_doc`.
+To create a custom function, you need to:
 
-### Inherit from the `Function` Class
+1. Create a configuration class and register it with a unique type name
+2. Create a function implementation class and register it with the config
+3. Implement the abstract methods `setup`, `acall`, and `aprocess_doc`
 
-Create a new class that inherits from `Function`.
+### Create and Register a Function Configuration
+
+First, create a configuration class that defines the parameters your function needs and register it with a unique type name using the `@register_function_config` decorator.
+
+```python
+from pydantic import BaseModel
+from vss_ctx_rag.models.function_models import register_function_config
+from typing import ClassVar, Dict, List, Optional
+
+@register_function_config("custom_function")
+class CustomFunctionConfig(BaseModel):
+    """Configuration for custom function."""
+
+    # Define allowed tool types that this function can use
+    # The format is {tool_type: [tool_keywords]}
+    # keyword can be any name but will determine the name of the tool in the function
+    # get_tool("db") will return the tool with the keyword "db" of type "vector_db"
+    # This is optional and can be omitted if not needed
+    ALLOWED_TOOL_TYPES: ClassVar[Dict[str, List[str]]] = {
+        "llm": ["llm"],
+        "vector_db": ["db"]
+    }
+
+    class CustomFunctionParams(BaseModel):
+        param1: Optional[int] = 10
+        param2: int
+
+    params: CustomFunctionParams
+```
+
+### Create and Register the Function Implementation
+
+Next, create the function implementation class that inherits from `Function` and register it with the configuration using the `@register_function` decorator.
 
 ```python
 from vss_ctx_rag.base.function import Function
+from vss_ctx_rag.models.function_models import register_function
 
+@register_function(config=CustomFunctionConfig)
 class CustomFunction(Function):
     def __init__(self, name: str):
         super().__init__(name)
@@ -39,16 +75,18 @@ class CustomFunction(Function):
 
 ### Implement the `setup` Method
 
-The `setup` method is used to initialize the function. It should return a dictionary of parameters that will be used by the function.
-In this method, you can get params and tools that are added to the function.
+The `setup` method is used to initialize the function.
+In this method, you can get params and tools that are added to the function in the configuration.
 
 ```python
 def setup(self) -> dict:
     """
     Initialize the function.
     """
-    self.batch_size = self.get_param("params", "batch_size")
-    self.vector_db = self.get_tool("vector_db")
+    self.param1 = self.get_param("param1", default=10)
+    self.param2 = self.get_param("param2")
+    self.vector_db = self.get_tool("db")
+    self.llm = self.get_tool("llm")
     return {}
 ```
 
@@ -77,32 +115,52 @@ def aprocess_doc(self, doc: str, doc_i: int, doc_meta: dict):
     ## Database operations can be done here
 ```
 
-### Add the Function to the Context Manager
+### Add the Function to Configuration
 
-To add the function to the Context Manager, use the `add_function` method. Add tools and functions to the function, as well as configure the function with parameters here.
-```python
-ctx_manager.add_function(
-    CustomFunction("custom_function")
-    .add_tool(LLM_TOOL_NAME, self.llm)
-    .config(**config)
-    .done()
-)
+With the registration system, functions are now configured declaratively in your configuration YAML file instead of being added programmatically. The function type you registered (e.g., `"custom_function"`) can now be used in your config file:
+
+```yaml
+functions:
+  my_custom_function:
+    type: custom_function  # This matches the name used in @register_function_config
+    params:
+      param1: 15
+      param2: 50
+      max_results: 50
+    tools:
+      llm: nvidia_llm      # Reference to a tool defined in the tools section
+      vector_db: milvus_db # Reference to another tool
 ```
 
-### Optional: Add a Function to another Function
+The Context Manager will automatically instantiate your function based on the configuration, eliminating the need for manual `add_function` calls.
 
-A function can also be added to another function.
+Functions are also created in topologically sorted order so no need to worry about dependencies.
 
-```python
-function.add_function(
-    CustomFunction("custom_function")
-    .add_function(
-        CustomFunction("custom_function_2")
-        .add_tool(LLM_TOOL_NAME, self.llm)
-        .config(**config)
-        .done()
-    )
-    .config(**config)
-    .done()
-)
+## Configuration Example
+
+Here's a complete example showing how your registered function would appear in a configuration file:
+
+```yaml
+tools:
+  nvidia_llm:
+    type: llm
+    params:
+      model: meta/llama-3.1-70b-instruct
+      api_key: !ENV ${NVIDIA_API_KEY}
+
+  milvus_db:
+    type: milvus
+    params:
+      host: localhost
+      port: 19530
+
+functions:
+  my_custom_function:
+    type: custom_function
+    params:
+      param1: 15
+      param2: 50
+    tools:
+      llm: nvidia_llm
+      vector_db: milvus_db
 ```

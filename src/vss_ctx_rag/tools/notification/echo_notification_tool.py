@@ -13,17 +13,31 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from vss_ctx_rag.tools.notification import NotificationTool
+from vss_ctx_rag.tools.notification.notification_tool import NotificationTool
 from vss_ctx_rag.utils.ctx_rag_logger import logger
+from vss_ctx_rag.models.tool_models import register_tool_config, register_tool
+from vss_ctx_rag.models.tool_models import ToolBaseModel
 
 
+@register_tool_config("echo_notifier")
+class EchoNotificationToolConfig(ToolBaseModel):
+    """Alert SSE Notifier configuration."""
+
+    pass
+
+
+@register_tool(config=EchoNotificationToolConfig)
 class EchoNotificationTool(NotificationTool):
     """Tool for printing notification on the terminal.
     Implements NotificationTool class
     """
 
-    def __init__(self, name="echo_notifier") -> None:
-        super().__init__(name)
+    def __init__(self, name="echo_notifier", config=None, tools=None) -> None:
+        super().__init__(name, config, tools)
+        self.update_tool(self.config, tools)
+
+    def update_tool(self, config, tools=None):
+        self.config = config
 
     async def notify(self, title: str, message: str, metadata: dict):
         try:

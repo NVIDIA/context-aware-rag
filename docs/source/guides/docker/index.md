@@ -14,26 +14,23 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 -->
-# Docker Deployment
+# Deployment
 
-This section contains guides for running and managing the VIA CTX RAG system using Docker.
+This section contains guides for running and managing the VIA CTX RAG system
 
 ## Available Guides
 
 - [Docker Compose](compose.md) - Instructions for running the complete system using Docker Compose
-- [Standalone Docker Service](docker.md) - Instructions for running individual services (Neo4j, Milvus) using Docker
 
 ## Overview
 
 The VIA CTX RAG system uses Docker to containerize its components, making it easy to deploy and manage the following services:
 
-- Neo4j: Graph database for storing and querying relationships
-- Milvus: Vector database for similarity search
+- Database of choice like Neo4j, Milvus, Arango etc.
 - Data Ingestion Service: For processing and storing data
 - Data Retrieval Service: For querying and retrieving information
 
 Choose the appropriate guide based on your deployment needs:
-- Use the Standalone Docker guide if you want to run services individually
 - Use the Docker Compose guide for a complete system deployment
 
 ```{toctree}
@@ -41,6 +38,5 @@ Choose the appropriate guide based on your deployment needs:
 :maxdepth: 2
 
 Docker Compose <./compose.md>
-Standalone Docker <./docker.md>
 
 ```

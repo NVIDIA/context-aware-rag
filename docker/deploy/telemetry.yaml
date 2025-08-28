@@ -14,64 +14,18 @@
 # limitations under the License.
 
 services:
-  jaeger:
-    image: jaegertracing/all-in-one:latest
-    container_name: jaeger
-    environment:
-      - METRICS_STORAGE_TYPE=prometheus
-      - PROMETHEUS_SERVER_URL=http://prometheus:9090
-      - SPAN_STORAGE_TYPE=cassandra
-
-    command:
-    - "--cassandra.servers=cassandra"
-    - "--cassandra.keyspace=jaeger_v1_dc1"
-    - "--query.base-path=/jaeger/ui"
-    ports:
-      - "16686:16686"
-      - "14268:14268"
-    depends_on:
-      cassandra-schema:
-        condition: service_started
-      cassandra:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "localhost:14269"]
-      interval: 30s
-      timeout: 120s
-      retries: 1000
-      start_period: 240s
-
-  cassandra:
-    image: cassandra:4.0
-    container_name: cassandra
-    volumes:
-      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/volumes_cassandra/cassandra:/var/lib/cassandra
-    healthcheck:
-      test: ["CMD", "cqlsh", "-e", "describe keyspaces" ]
-      interval: 10s
-      timeout: 120s
-      retries: 60
-      start_period: 120s
-
-  cassandra-schema:
-    image: jaegertracing/jaeger-cassandra-schema
-    container_name: cassandra_schema
-    depends_on:
-      cassandra:
-        condition: service_healthy
-
   otel_collector:
     image: otel/opentelemetry-collector-contrib:latest
     container_name: otel_collector
     volumes:
-      - ${OTEL_COLLOR_CONFIG:-${PWD}/docker/configs/otel-collector-config.yml}:/etc/otelcol/otel-collector-config.yml
+      - ${OTEL_COLLECTOR_CONFIG:-${PWD}/configs/otel-collector-config.yml}:/etc/otelcol/otel-collector-config.yml
     command: --config /etc/otelcol/otel-collector-config.yml
     ports:
       - "4318:4318"
       - "8889:8889"
     depends_on:
-      jaeger:
-        condition: service_healthy
+      phoenix:
+        condition: service_started
       prometheus:
         condition: service_started
 
@@ -81,7 +35,7 @@ services:
     user: ":"
     volumes:
       - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/volumes_prometheus:/prometheus
-      - ${PROMETHEUS_CONFIG:-${PWD}/docker/configs/prometheus.yml}:/etc/prometheus/prometheus.yml
+      - ${PROMETHEUS_CONFIG:-${PWD}/configs/prometheus.yml}:/etc/prometheus/prometheus.yml
     ports:
       - "9090:9090"
 
@@ -103,3 +57,24 @@ services:
       timeout: 120s
       retries: 60
       start_period: 120s
+
+  phoenix:
+    image: arizephoenix/phoenix:latest
+    container_name: phoenix
+    ports:
+      - "16686:6006"  # Phoenix UI (keeping same external port as Jaeger for compatibility)
+      - "4317:4317"   # Phoenix gRPC port
+    environment:
+      - PHOENIX_WORKING_DIR=/mnt/data
+    volumes:
+      - phoenix_data:/mnt/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6006/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  phoenix_data:
+    driver: local

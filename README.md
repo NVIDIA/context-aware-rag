@@ -29,6 +29,7 @@ Context Aware RAG is a flexible library designed to seamlessly integrate into ex
 - [**Function and Tool Components:**](https://nvidia.github.io/context-aware-rag/overview/architecture.html#components) Easy to create custom functions and tools to support your existing workflows.
 - [**GraphRAG:**](https://nvidia.github.io/context-aware-rag/overview/features.html#retrieval-strategies) Seamlessly extract knowledge graphs from data to support your existing workflows.
 - [**Observability:**](https://nvidia.github.io/context-aware-rag/metrics.html) Monitor and troubleshoot your workflows with any OpenTelemetry-compatible monitoring tool.
+- [**Experimental Features:**](https://nvidia.github.io/context-aware-rag/overview/experimental.html) CA-RAG also provides structured output mode for response and five important Model Context Protocol (MCP) tools for using CA-RAG with AI agentic workflows.
 
 
 With Context Aware RAG, you can quickly build RAG pipelines to support your existing workflows.
@@ -37,8 +38,8 @@ With Context Aware RAG, you can quickly build RAG pipelines to support your exis
 
  * [Documentation](https://nvidia.github.io/context-aware-rag): Explore the full documentation for Context Aware RAG.
  * [Context Aware RAG Architecture](https://nvidia.github.io/context-aware-rag/overview/architecture.html): Learn more about how Context Aware RAG works and its components.
- * [Getting Started Guide](https://nvidia.github.io/context-aware-rag/guides/index.html): Set up your environment and start integrating Context Aware RAG into your workflows.
- * [Examples](https://nvidia.github.io/context-aware-rag/guides/library.html#document-ingestion): Explore examples of Context Aware RAG workflows.
+ * [Getting Started Guide](https://nvidia.github.io/context-aware-rag/intro/setup.html): Set up your environment and start integrating Context Aware RAG into your workflows.
+ * [Examples](https://nvidia.github.io/context-aware-rag/examples/pdf_qna.html): Explore examples of Context Aware RAG workflows.
  * [Troubleshooting](https://nvidia.github.io/context-aware-rag/troubleshooting.html): Get help with common issues.
  * [Release Notes](https://nvidia.github.io/context-aware-rag/release-notes.html): Learn about the latest features and improvements.
 
@@ -74,11 +75,23 @@ source .venv/bin/activate
 uv pip install -e .
 ```
 
+#### Installing optional plugins
+
+##### Arango
+```bash
+uv pip install -e .[arango]
+```
+
+##### NAT
+```bash
+uv pip install -e .[nat]
+```
+
 #### Optional: Building and Installing the wheel file
 
 ```bash
 uv build
-uv pip install vss_ctx_rag-0.5.0-py3-none-any.whl
+uv pip install dist/vss_ctx_rag-1.0.0-py3-none-any.whl
 ```
 
 ## Service Example
@@ -98,6 +111,14 @@ Create a .env file in the root directory and set the following variables:
 
    VSS_CTX_PORT_RET=<DATA RETRIEVAL PORT>
    VSS_CTX_PORT_IN=<DATA INGESTION PORT>
+
+   GRAPH_DB_USERNAME=<GRAPH_DB_USERNAME>
+   GRAPH_DB_PASSWORD=<GRAPH_DB_PASSWORD>
+   ARANGO_DB_USERNAME=root
+   ARANGO_DB_PASSWORD=<ARANGO_DB_PASSWORD>
+   MINIO_USERNAME=<MINIO_USERNAME>
+   MINIO_PASSWORD=<MINIO_PASSWORD>
+
 ```
 
 ### Build docker
@@ -106,7 +127,7 @@ Create a .env file in the root directory and set the following variables:
 make -C docker build
 ```
 
-### Using docker compose
+### Start using docker compose
 
 ```bash
 make -C docker start_compose
@@ -131,7 +152,7 @@ This will start the following services:
 
 * otel-collector
 
-* jaeger
+* Phoenix
 
   * UI available at `http://<HOST>:16686`
 
@@ -139,15 +160,21 @@ This will start the following services:
 
   * UI available at `http://<HOST>:9090`
 
-* cassandra
 
 To change the storage volumes, export `DOCKER_VOLUME_DIRECTORY` to the desired directory.
+
+### Stop using docker compose
+
+```bash
+make -C docker stop_compose
+```
 
 ### Data Ingestion Example
 
 ```python
 import requests
 import json
+from pyaml_env import parse_config
 
 base_url = "http://<HOST>:<VSS_CTX_PORT_IN>"
 
@@ -158,7 +185,7 @@ init_data = {"uuid": "1"}
 ### Optional: Initialize the service with a config file or context config
 """
 init_data = {"config_path": "/app/config/config.yaml", "uuid": "1"}
-init_data = {"context_config": yaml.safe_load(open("/app/config/config.yaml")), "uuid": "1"}
+init_data = {"context_config": parse_config("/app/config/config.yaml"), "uuid": "1"}
 """
 response = requests.post(
     f"{base_url}/init", headers=headers, data=json.dumps(init_data)
@@ -166,20 +193,75 @@ response = requests.post(
 
 # POST request to /add_doc to add documents to the service
 add_doc_data_list = [
-    {"document": "User1: I went hiking to Mission Peak", "doc_index": 4},
     {
         "document": "User1: Hi how are you?",
         "doc_index": 0,
-        "doc_metadata": {"is_first": True},
+        "doc_metadata": {
+            "streamId": "stream1",
+            "chunkIdx": 0,
+            "file": "chat_conversation.txt",
+            "is_first": True,
+            "is_last": False,
+            "uuid": "1"
+        },
+        "uuid": "1"
     },
-    {"document": "User1: I went hiking to Mission Peak", "doc_index": 4},
-    {"document": "User1: I am great too. Thanks for asking", "doc_index": 2},
-    {"document": "User2: I am good. How are you?", "doc_index": 1},
-    {"document": "User2: So what did you do over the weekend?", "doc_index": 3},
+    {
+        "document": "User2: I am good. How are you?",
+        "doc_index": 1,
+        "doc_metadata": {
+            "streamId": "stream1",
+            "chunkIdx": 1,
+            "file": "chat_conversation.txt",
+            "uuid": "1"
+        },
+        "uuid": "1"
+    },
+    {
+        "document": "User1: I am great too. Thanks for asking",
+        "doc_index": 2,
+        "doc_metadata": {
+            "streamId": "stream1",
+            "chunkIdx": 2,
+            "file": "chat_conversation.txt",
+            "uuid": "1"
+        },
+        "uuid": "1"
+    },
+    {
+        "document": "User2: So what did you do over the weekend?",
+        "doc_index": 3,
+        "doc_metadata": {
+            "streamId": "stream1",
+            "chunkIdx": 3,
+            "file": "chat_conversation.txt",
+            "uuid": "1"
+        },
+        "uuid": "1"
+    },
+    {
+        "document": "User1: I went hiking to Mission Peak",
+        "doc_index": 4,
+        "doc_metadata": {
+            "streamId": "stream1",
+            "chunkIdx": 4,
+            "file": "chat_conversation.txt",
+            "uuid": "1"
+        },
+        "uuid": "1"
+    },
     {
         "document": "User3: Guys there is a fire. Let us get out of here",
         "doc_index": 5,
-        "doc_metadata": {"is_last": True},
+        "doc_metadata": {
+            "streamId": "stream1",
+            "chunkIdx": 5,
+            "file": "chat_conversation.txt",
+            "is_first": False,
+            "is_last": True,
+            "uuid": "1"
+        },
+        "uuid": "1"
     },
 ]
 
@@ -188,6 +270,12 @@ for add_doc_data in add_doc_data_list:
     response = requests.post(
         f"{base_url}/add_doc", headers=headers, data=json.dumps(add_doc_data)
     )
+    print(response.text)
+
+response = requests.post(
+    f"{base_url}/complete_ingestion", headers=headers, data=json.dumps({"uuid": "1"})
+)
+print(response.text)
 ```
 
 ### Data Retrieval Example
@@ -201,22 +289,44 @@ base_url = "http://<HOST>:<VSS_CTX_PORT_RET>"
 
 headers = {"Content-Type": "application/json"}
 
-### Initialize the service with the same uuid as the data ingestion service
 init_data = {"config_path": "/app/config/config.yaml", "uuid": "1"}
 response = requests.post(
     f"{base_url}/init", headers=headers, data=json.dumps(init_data)
 )
 
-### Send a retrieval request to the service
-call_data = {"chat": {"question": "What happens in this situation?"}}
+chat_data = {
+    "model": "meta/llama-3.1-70b-instruct",
+    "base_url": "https://integrate.api.nvidia.com/v1",
+    "messages": [{"role": "user", "content": "Who mentioned the fire?"}],
+    "uuid": "1"
+}
 
-request_data = {"state": call_data}
+response = requests.post(f"{base_url}/chat/completions", headers=headers, data=json.dumps(chat_data))
+print(response.json()["choices"][0]["message"]["content"])
+```
 
-response = requests.post(
-    f"{base_url}/call", headers=headers, data=json.dumps(request_data)
-)
+
+### Summary Data Retrieval Example
+
+Summary data retrieval can be made to the system using the `/summary` endpoint of the Retrieval Service.
+
+#### Example Query
+
+```python
+import requests
+
+url = "http://<HOST>:<VSS_CTX_PORT_RET>/summary"
+headers = {"Content-Type": "application/json"}
+data = {
+    "uuid": "1",
+    "summarization": {
+        "start_index": 0,
+        "end_index": -1
+    }
+}
+
+response = requests.post(url, headers=headers, json=data)
 print(response.json()["result"])
-
 ```
 
 ## Acknowledgements
@@ -226,6 +336,8 @@ We would like to thank the following projects that made Context Aware RAG possib
 - [FastAPI](https://github.com/tiangolo/fastapi)
 - [LangChain](https://github.com/langchain-ai/langchain)
 - [Neo4j](https://github.com/neo4j/neo4j)
+- [ArangoDB](https://github.com/arangodb/arangodb)
+- [Elasticsearch](https://github.com/elastic/elasticsearch)
 - [Milvus](https://github.com/milvus-io/milvus)
 - [uv](https://github.com/astral-sh/uv)
 - [OpenTelemetry](https://github.com/open-telemetry/opentelemetry-python)

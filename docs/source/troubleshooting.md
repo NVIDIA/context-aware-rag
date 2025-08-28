@@ -24,7 +24,7 @@ This section contains common issues and how to troubleshoot them.
 If you ingest documents and then run retrieval, but see the following
 result
 
-``` bash
+```bash
 Response: "I don't know"
 ```
 
@@ -40,11 +40,19 @@ that can be used to verify service status:
 import requests
 
 # Check Data Ingestion Service health
-response = requests.get("http://localhost:8001/health")
+response = requests.get("http://localhost:8001/health/live")
+print(response.text)
+
+# Check Data Ingestion Service health
+response = requests.get("http://localhost:8001/health/ready")
 print(response.text)
 
 # Check Retrieval Service health
-response = requests.get("http://localhost:8000/health")
+response = requests.get("http://localhost:8000/health/live")
+print(response.text)
+
+# Check Retrieval Service health
+response = requests.get("http://localhost:8000/health/ready")
 print(response.text)
 ```
 
