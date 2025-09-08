@@ -17,11 +17,10 @@
 
 import asyncio
 import aiohttp
-from typing import Dict, Any
 import os
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict, Any
 import traceback
 import json
 import re
@@ -66,6 +65,12 @@ DEFAULT_BATCH_ENRICHMENT_PROMPT = (
 )
 
 
+@register_function_config("batch_summarization")
+class BatchSummarizationConfig(SummarizationConfig):
+    pass
+
+
+@register_function(config=BatchSummarizationConfig)
 class BatchSummarization(Function):
     """Batch Summarization Function"""
 
@@ -88,31 +93,12 @@ class BatchSummarization(Function):
 
     def _extract_external_rag_query(self, text: str) -> tuple[str, str]:
         """Extract external RAG query from text marked with <e> tags."""
-        logger.info(f"=== DEBUG: _extract_external_rag_query ===")
-        logger.info(f"Input text: {repr(text)}")
-        logger.info(f"Input text length: {len(text)}")
-        
-        # Check for exact character sequences
-        logger.info(f"Contains '<e>': {'<e>' in text}")
-        
-        # Look for the exact sequence at the end
-        text_end = text[-100:] if len(text) > 100 else text
-        logger.info(f"Last 100 chars: {repr(text_end)}")
-        
-        # Look for <e>content<e> pattern - match the last occurrence
         pattern = r'<e>(.*?)<e>'
-        logger.info(f"Regex pattern: {pattern}")
-        
-        # Use DOTALL flag to match across newlines
-        matches = re.findall(pattern, text, re.DOTALL)
-        logger.info(f"Regex matches: {matches}")
-        
+        # Remove the tagged content and get clean text
         clean_text = re.sub(pattern, '', text, flags=re.DOTALL).strip()
-        logger.info(f"Clean text: {repr(clean_text)}")
-        
+        # Extract the content between tags
+        matches = re.findall(pattern, text, re.DOTALL)
         external_rag_query = matches[0] if matches else ''
-        logger.info(f"External RAG query: {repr(external_rag_query)}")
-        logger.info(f"=== END DEBUG: _extract_external_rag_query ===")
         
         return clean_text, external_rag_query
 
@@ -164,7 +150,6 @@ class BatchSummarization(Function):
                 payload["reranker_endpoint"] = self.reranker_endpoint
 
             logger.info(f"Sending request to: {endpoint}")
-            logger.debug(f"Payload: {json.dumps(payload, indent=2)}")
 
             async with aiohttp.ClientSession() as session:
                 async with session.post(
@@ -179,7 +164,6 @@ class BatchSummarization(Function):
                         return ""
                     
                     content_type = response.headers.get('Content-Type', '')
-                    logger.info(f"Response Content-Type: {content_type}")
                     context = ""  # Initialize
 
                     if 'text/event-stream' in content_type:
@@ -188,15 +172,12 @@ class BatchSummarization(Function):
                         citations_list = []  # Still collect to see if they are sent
                         async for line_bytes in response.content:
                             line_decoded = line_bytes.decode('utf-8').strip()
-                            logger.debug(f"Stream line: {line_decoded}")
                             if line_decoded.startswith('data: '):
                                 data_str = line_decoded[6:]
                                 if data_str == '[DONE]':
-                                    logger.debug("Stream [DONE]")
                                     break
                                 try:
                                     event_data = json.loads(data_str)
-                                    logger.debug(f"Stream event_data: {event_data}")
                                     if 'choices' in event_data and len(event_data['choices']) > 0:
                                         delta = event_data['choices'][0].get('delta', {})
                                         if 'content' in delta and delta['content'] is not None:
@@ -215,7 +196,6 @@ class BatchSummarization(Function):
                     else:
                         logger.info("Processing standard JSON response...")
                         json_response = await response.json()
-                        logger.debug(f"JSON response data: {json_response}")
                         context = json_response.get("answer", "")  # Only the main answer
                         # Parse and log citations if present, but don't append
                         citations_data = json_response.get("citations", {})
@@ -244,37 +224,27 @@ class BatchSummarization(Function):
 
     def setup(self):
         # fixed params
-        caption_summarization_prompt = self.get_param("prompts", "caption_summarization")
-        
-        # DEBUG: Log what prompt is received
-        logger.info(f"=== DEBUG: BatchSummarization.setup() ===")
-        logger.info(f"caption_summarization_prompt received: {caption_summarization_prompt}")
-        logger.info(f"EXTERNAL_RAG_ENABLED env var: {os.environ.get('EXTERNAL_RAG_ENABLED', 'NOT_SET')}")
-        logger.info(f"EXTERNAL_RAG_CUSTOM_SERVER env var: {os.environ.get('EXTERNAL_RAG_CUSTOM_SERVER', 'NOT_SET')}")
+        prompts = self.get_param("prompts")
         
         # Store external RAG query for later use, but use clean prompt for batch processing
         self.external_rag_query = None
         if os.environ.get("EXTERNAL_RAG_ENABLED", "false").lower() == "true":
-            clean_prompt, external_rag_query = self._extract_external_rag_query(caption_summarization_prompt)
-            logger.info(f"=== DEBUG: After extraction ===")
-            logger.info(f"clean_prompt: {clean_prompt}")
-            logger.info(f"external_rag_query: {external_rag_query}")
+            clean_prompt, external_rag_query = self._extract_external_rag_query(prompts.get("caption_summarization"))
             if external_rag_query:
                 self.external_rag_query = external_rag_query
                 logger.info(f"External RAG query stored for final aggregation: {external_rag_query}")
                 # Use clean prompt for batch processing (without <e> tags)
-                caption_summarization_prompt = clean_prompt
+                prompts = prompts.copy()
+                prompts["caption_summarization"] = clean_prompt
                 logger.info("Using clean caption prompt for batch processing")
             else:
                 logger.info("No external RAG query found in caption summarization prompt")
         else:
             logger.info("EXTERNAL_RAG_ENABLED is not set to 'true'")
         
-        logger.info(f"=== END DEBUG ===")
-        
         self.batch_prompt = ChatPromptTemplate.from_messages(
             [
-                ("system", caption_summarization_prompt),
+                ("system", prompts.get("caption_summarization")),
                 ("user", "{input}"),
             ]
         )
@@ -455,224 +425,19 @@ class BatchSummarization(Function):
             logger.error(f"Error adding summary to database: {e}")
 
     async def acall(self, state: dict):
-        """batch summarization function call"""
-        logger.info("Starting batch summarization")
-        with TimeMeasure("OffBatchSumm/Acall", "blue"):
-            batches = []
-            self.call_schema.validate(state)
-            stop_time = time.time() + self.timeout
-            target_start_batch_index = self.batcher.get_batch_index(
-                state["start_index"]
-            )
-            target_end_batch_index = self.batcher.get_batch_index(state["end_index"])
-            logger.info(f"Target Batch Start: {target_start_batch_index}")
-            logger.info(f"Target Batch End: {target_end_batch_index}")
-            if target_end_batch_index == -1:
-                logger.info(f"Current batch index: {self.curr_batch_i}")
-                target_end_batch_index = self.curr_batch_i
-            while time.time() < stop_time:
-                batches = await self.vector_db.aget_text_data(
-                    fields=["text", "batch_i"],
-                    filter=f"doc_type == 'caption_summary' and "
-                    f"{target_start_batch_index}<=batch_i<={target_end_batch_index}",
-                )
-                # Sort batches by batch_i field
-                batches.sort(key=lambda x: x["batch_i"])
-                logger.debug(f"Batches Fetched: {batches}")
-                logger.info(f"Number of Batches Fetched: {len(batches)}")
+        """batch summarization function call
 
-                # Need ceiling of results/batch_size for correct batch size target end
-                if (
-                    len(batches)
-                    == target_end_batch_index - target_start_batch_index + 1
-                ):
-                    logger.info(
-                        f"Need {target_end_batch_index - target_start_batch_index + 1} batches. Moving forward."
-                    )
-                    break
-                else:
-                    logger.info(
-                        f"Need {target_end_batch_index - target_start_batch_index + 1} batches. Waiting ..."
-                    )
-                    await asyncio.sleep(1)
-                    continue
-
-            if len(batches) == 0:
-                state["result"] = ""
-                state["error_code"] = "No batch summaries found"
-                logger.error("No batch summaries found")
-            elif len(batches) > 0:
-                with TimeMeasure("summ/acall/batch-aggregation-summary", "pink") as bas:
-                    with get_openai_callback() as cb:
-                        async def aggregate_token_safe(batch, retries_left):
-                            try:
-                                with TimeMeasure("OffBatSumm/AggPipeline", "blue"):
-                                    logger.info(f"BatchSummarization.acall: Input to aggregation_pipeline (list of batch summaries): {batch}")
-                                    results = await self.aggregation_pipeline.ainvoke(
-                                        batch
-                                    )
-                                    logger.info(f"BatchSummarization.acall: Result from aggregation_pipeline: {results[:500]}...")
-                                    return results
-                            except Exception as e:
-                                if "400" not in str(e):
-                                    raise e
-                                logger.warning(
-                                    f"Received 400 error from LLM endpoint {e}. "
-                                    "If this is token length exceeded, resolving now..."
-                                )
-
-                                if retries_left <= 0:
-                                    logger.debug(
-                                        "Maximum recursion depth exceeded. Returning batch as is."
-                                    )
-                                    return batch
-
-                                if len(batch) == 1:
-                                    with TimeMeasure("OffBatSumm/BaseCase", "yellow"):
-                                        logger.debug("Base Case, batch size = 1")
-                                        text = batch[0]
-                                        text_splitter = RecursiveCharacterTextSplitter(
-                                            chunk_size=len(text) // 2,
-                                            chunk_overlap=50,
-                                            length_function=len,
-                                            is_separator_regex=False,
-                                        )
-
-                                        chunks = text_splitter.split_text(text)
-                                        first_half, second_half = chunks[0], chunks[1]
-
-                                        logger.debug(
-                                            f"Text exceeds token length. Splitting into "
-                                            f"two parts of lengths {len(first_half)} and {len(second_half)}."
-                                        )
-
-                                        tasks = [
-                                            aggregate_token_safe(
-                                                [first_half], retries_left - 1
-                                            ),
-                                            aggregate_token_safe(
-                                                [second_half], retries_left - 1
-                                            ),
-                                        ]
-                                        summaries = await asyncio.gather(*tasks)
-                                        combined_summary = "\n".join(summaries)
-
-                                        try:
-                                            aggregated = (
-                                                await self.aggregation_pipeline.ainvoke(
-                                                    [combined_summary]
-                                                )
-                                            )
-                                            return aggregated
-                                        except Exception:
-                                            logger.debug(
-                                                "Error after combining summaries, retrying with combined summary."
-                                            )
-                                            return await aggregate_token_safe(
-                                                [combined_summary], retries_left - 1
-                                            )
-                                else:
-                                    midpoint = len(batch) // 2
-                                    first_batch = batch[:midpoint]
-                                    second_batch = batch[midpoint:]
-
-                                    logger.debug(
-                                        f"Batch size {len(batch)} exceeds token length. "
-                                        f"Splitting into two batches of sizes {len(first_batch)} and {len(second_batch)}."
-                                    )
-
-                                    tasks = [
-                                        aggregate_token_safe(
-                                            first_batch, retries_left - 1
-                                        ),
-                                        aggregate_token_safe(
-                                            second_batch, retries_left - 1
-                                        ),
-                                    ]
-                                    results = await asyncio.gather(*tasks)
-
-                                    combined_results = []
-                                    for result in results:
-                                        if isinstance(result, list):
-                                            combined_results.extend(result)
-                                        else:
-                                            combined_results.append(result)
-
-                                    try:
-                                        with TimeMeasure(
-                                            "OffBatSumm/CombindAgg", "red"
-                                        ):
-                                            aggregated = (
-                                                await self.aggregation_pipeline.ainvoke(
-                                                    combined_results
-                                                )
-                                            )
-                                            return aggregated
-                                    except Exception:
-                                        logger.debug(
-                                            "Error after combining batch summaries, retrying with combined summaries."
-                                        )
-                                        return await aggregate_token_safe(
-                                            combined_results, retries_left - 1
-                                        )
-
-                        # Get initial aggregated summary
-                        result = await aggregate_token_safe(batches, self.recursion_limit)
-                        
-                        # Process external RAG at final aggregation if query was stored
-                        if self.external_rag_query:
-                            logger.info(f"Processing external RAG at final aggregation with query: {self.external_rag_query}")
-                            try:
-                                external_context = await self._get_external_rag_context(self.external_rag_query)
-                                if external_context:
-                                    logger.info("=== BATCH_SUMMARIZATION_ENRICHMENT_PROMPT Logic Start ===")
-                                    custom_prompt = os.getenv("BATCH_SUMMARIZATION_ENRICHMENT_PROMPT", "").strip()
-                                    logger.info(f"BATCH_SUMMARIZATION_ENRICHMENT_PROMPT env var length: {len(custom_prompt)}")
-                                    logger.info(f"BATCH_SUMMARIZATION_ENRICHMENT_PROMPT first 200 chars: {custom_prompt[:200]}...")
-                                    prompt_template = custom_prompt if custom_prompt else DEFAULT_BATCH_ENRICHMENT_PROMPT
-                                    logger.info(f"Using custom prompt: {bool(custom_prompt)}")
-                                    logger.info(f"Final prompt template length: {len(prompt_template)}")
-                                    logger.info(f"Final prompt template first 200 chars: {prompt_template[:200]}...")
-                                    enrichment_prompt = ChatPromptTemplate.from_template(prompt_template)
-                                    logger.info("ChatPromptTemplate created successfully")
-                                    enriched_pipeline = enrichment_prompt | self.get_tool(LLM_TOOL_NAME) | self.output_parser
-                                    logger.info("Enriched pipeline created successfully")
-                                    logger.info(f"Video summary length for enrichment: {len(result)}")
-                                    logger.info(f"External context length for enrichment: {len(external_context)}")
-                                    result = await enriched_pipeline.ainvoke({
-                                        "video_summary": result,
-                                        "external_context": external_context
-                                    })
-                                    logger.info("Video summary enriched with external RAG context successfully")
-                                    logger.info("=== BATCH_SUMMARIZATION_ENRICHMENT_PROMPT Logic End ===")
-                                else:
-                                    logger.info("External RAG returned no context, using original summary")
-                            except Exception as e:
-                                logger.error(f"External RAG enrichment failed: {e}", exc_info=True)
-                                logger.info("Continuing with original summary without enrichment")
-                        
-                        state["result"] = result
-                    logger.info("Summary Aggregation Done")
-                    self.metrics.aggregation_tokens = cb.total_tokens
-                    logger.info(
-                        "Total Tokens: %s, Prompt Tokens: %s, Completion Tokens: %s, "
-                        "Successful Requests: %s, Total Cost (USD): $%s"
-                        % (
-                            cb.total_tokens,
-                            cb.prompt_tokens,
-                            cb.completion_tokens,
-                            cb.successful_requests,
-                            cb.total_cost,
-                        ),
-                    )
-                self.metrics.aggregation_latency = bas.execution_time
-
-        if self.log_dir:
-            log_path = Path(self.log_dir).joinpath("summary_metrics.json")
-            self.metrics.dump_json(log_path.absolute())
-        return state
-
-    async def aprocess_doc(self, doc: str, doc_i: int, doc_meta: dict):
+        Args:
+            state (dict): should validate against call_schema
+        Returns:
+            dict: the state dict will contain result:
+            {
+                # ...
+                # The following key is overwritten or added
+                "result" : "summary",
+                "error_code": "Error String" # Optional
+            }
+        """
         try:
             logger.info(f"Batch Summarization Acall: {state}")
             with Metrics("OffBatchSumm/Acall", "blue"):
@@ -712,39 +477,11 @@ class BatchSummarization(Function):
                         logger.info(
                             f"Need {target_end_batch_index - target_start_batch_index + 1} batches. Moving forward."
                         )
-                        try:
-                            with get_openai_callback() as cb:
-                                batch_summary = await self.batch_pipeline.ainvoke(
-                                    " ".join([doc for doc, _, _ in batch.as_list()])
-                                )
-                        except Exception as e:
-                            logger.error(
-                                f"Error summarizing batch {batch._batch_index}: {e}"
-                            )
-                            batch_summary = "."
-                            cb = type('obj', (object,), {'total_tokens': 0, 'successful_requests': 0})()
-                        self.metrics.summary_tokens += cb.total_tokens
-                        self.metrics.summary_requests += cb.successful_requests
-
-                        chunk_indices = list(
-                            set(
-                                doc_meta.get("chunkIdx")
-                                for _, _, doc_meta in batch.as_list()
-                            )
-                        )
-
-                        if self.graph_db:
-                            logger.debug(
-                                f"Adding batch summary {batch._batch_index} to Graph DB"
-                            )
-                            self.graph_db.add_summary(
-                                summary=batch_summary,
-                                metadata={
-                                    "chunkIdx": chunk_indices,
-                                    "batch_i": batch._batch_index,
-                                    "uuid": doc_meta["uuid"],
-                                },
-                            )
+                        break
+                    elif (
+                        len(batches)
+                        >= target_end_batch_index - target_start_batch_index + 1
+                    ):
                         logger.info(
                             f"Found {len(batches)} batches. Taking first {target_end_batch_index - target_start_batch_index + 1} batches."
                         )
@@ -776,6 +513,28 @@ class BatchSummarization(Function):
                             result = await call_token_safe(
                                 batches, self.aggregation_pipeline, self.recursion_limit
                             )
+                            
+                            # Process external RAG at final aggregation if query was stored
+                            if self.external_rag_query:
+                                logger.info(f"Processing external RAG at final aggregation with query: {self.external_rag_query}")
+                                try:
+                                    external_context = await self._get_external_rag_context(self.external_rag_query)
+                                    if external_context:
+                                        custom_prompt = os.getenv("BATCH_SUMMARIZATION_ENRICHMENT_PROMPT", "").strip()
+                                        prompt_template = custom_prompt if custom_prompt else DEFAULT_BATCH_ENRICHMENT_PROMPT
+                                        enrichment_prompt = ChatPromptTemplate.from_template(prompt_template)
+                                        enriched_pipeline = enrichment_prompt | self.get_tool(LLM_TOOL_NAME) | self.output_parser
+                                        result = await enriched_pipeline.ainvoke({
+                                            "video_summary": result,
+                                            "external_context": external_context
+                                        })
+                                        logger.info("Video summary enriched with external RAG context successfully")
+                                    else:
+                                        logger.info("External RAG returned no context, using original summary")
+                                except Exception as e:
+                                    logger.error(f"External RAG enrichment failed: {e}", exc_info=True)
+                                    logger.info("Continuing with original summary without enrichment")
+                            
                             state["result"] = result
                         logger.info("Summary Aggregation Done")
                         self.metrics.aggregation_tokens = cb.total_tokens
@@ -793,17 +552,30 @@ class BatchSummarization(Function):
                                 cb.total_cost,
                             ),
                         )
-                    try:
-                        batch_meta = {
-                            **doc_meta,
-                            "batch_i": batch._batch_index,
-                            "doc_type": "caption_summary",
-                        }
-                        self.vector_db.add_summary(
-                            summary=batch_summary, metadata=batch_meta
-                        )
-                    except Exception as e:
-                        logger.error(e)
+                    self.metrics.aggregation_latency = bas.execution_time
+            if self.log_dir:
+                log_path = Path(self.log_dir).joinpath("summary_metrics.json")
+                self.metrics.dump_json(log_path.absolute())
+        except Exception as e:
+            logger.error(f"Error in batch summarization: {e}")
+            state["error_code"] = f"{e}"
+            raise e
+        return state
+
+    async def aprocess_doc(self, doc: str, doc_i: int, doc_meta: dict):
+        try:
+            logger.info("Adding doc %d", doc_i)
+            doc_meta.setdefault("is_first", False)
+            doc_meta.setdefault("is_last", False)
+
+            with Metrics("summ/aprocess_doc", "red") as bs:
+                # Add timestamps to document using utility function
+                doc = add_timestamps_to_doc(doc, doc_meta)
+                doc_meta["batch_i"] = doc_i // self.batch_size
+                batch = self.batcher.add_doc(doc, doc_i, doc_meta)
+                if batch.is_full():
+                    # Process the batch immediately when full
+                    await asyncio.create_task(self._process_full_batch(batch))
             if self.summary_start_time is None:
                 self.summary_start_time = bs.start_time
             self.metrics.summary_latency = bs.end_time - self.summary_start_time
