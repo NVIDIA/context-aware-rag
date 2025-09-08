@@ -15,11 +15,12 @@
 
 import re
 import threading
+import json
 from functools import partial
 from typing import Any, List
 
 from langchain_community.chat_message_histories import ChatMessageHistory
-from langchain_core.messages import BaseMessage
+from langchain_core.messages import BaseMessage, AIMessage, HumanMessage, SystemMessage
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.prompts.chat import MessagesPlaceholder
@@ -190,10 +191,8 @@ class GraphRetrieval:
         self,
         question: str,
         formatted_docs: List[str],
-        image_list_base64: List[str] = [],
-        response_method: str | None = None,
-        response_schema: dict | None = None,
-    ) -> str | dict:
+        image_list_base64: List[dict] = [],
+    ) -> AIMessage:
         """
         Get the response from the chat history.
 
@@ -202,81 +201,72 @@ class GraphRetrieval:
             formatted_docs: The formatted documents.
 
         Returns:
-            str: The response.
+            AIMessage: The response.
         """
         with Metrics(
             "GraphRetrieval/GetResponse", "blue", span_kind=Metrics.SPAN_KIND["CHAIN"]
         ):
-            if image_list_base64:
-                image_message_list = [
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": ("data:image/jpeg;base64," + image_list_base64[j]),
-                        },
-                    }
-                    for j in range(len(image_list_base64))
-                ]
+            docs_string = "".join(formatted_docs)
 
-                messages = [
-                    {
-                        "role": "system",
-                        "content": CHAT_SYSTEM_IMAGE_PREFIX
-                        + CHAT_SYSTEM_TEMPLATE_SUFFIX,
-                    },
-                    {
-                        "role": "user",
-                        "content": [
-                            *image_message_list,
-                            {
-                                "type": "text",
-                                "text": f"Question: {question}\nVideo Summary: {formatted_docs}",
+            processed_image_messages = []
+            # Only attempt to process image_list_base64 if it's not empty and self.image was true (implied by image_list_base64 not being default)
+            if image_list_base64: 
+                for j in range(len(image_list_base64)):
+                    img_data = image_list_base64[j]
+                    # Ensure img_data is a dict and has the necessary keys with non-empty values
+                    if isinstance(img_data, dict) and \
+                       img_data.get("image_embed") and \
+                       img_data.get("timestamp"):
+                        processed_image_messages.append({
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{img_data['image_embed']}",
+                                "timestamp": img_data['timestamp'],
                             },
-                        ],
-                    },
-                ]
-            else:
-                messages = [
-                    {
-                        "role": "system",
-                        "content": CHAT_SYSTEM_TEMPLATE_PREFIX
-                        + CHAT_SYSTEM_TEMPLATE_SUFFIX,
-                    },
-                    {
-                        "role": "user",
-                        "content": f"Question: {question}\nVideo Summary: {formatted_docs}",
-                    },
-                ]
+                        })
+                    else:
+                        logger.warning(f"Skipping invalid or incomplete image data at index {j}: {img_data}")
 
-            if response_method is not None and response_method not in [
-                "json_mode",
-                "text",
-                "function_calling",
-            ]:
-                raise ValueError(
-                    f"Invalid response_method: {response_method}, has to be one of json_mode, text, or function_calling"
+            final_messages = []
+            if processed_image_messages: # If we successfully processed actual images
+                final_messages.append(
+                    SystemMessage(content=CHAT_SYSTEM_IMAGE_PREFIX + CHAT_SYSTEM_TEMPLATE_SUFFIX)
                 )
-
-            if response_method is not None and response_method != "text":
-                if response_method == "json_mode" and "json" not in question.lower():
-                    raise ValueError("JSON mode requires 'json' in the question")
-
-                logger.info(
-                    f"AI response with structured output: {response_method}, {response_schema}"
+                
+                user_content_list = []
+                user_content_list.extend(processed_image_messages)
+                user_content_list.append({
+                    "type": "text",
+                    "text": f"Question: {question}\nVideo Summary: {docs_string}",
+                })
+                final_messages.append(HumanMessage(content=user_content_list))
+            else: # No images to include (either image_list_base64 was initially empty, or nothing valid was processed from it)
+                final_messages.append(
+                    SystemMessage(content=CHAT_SYSTEM_TEMPLATE_PREFIX + docs_string + CHAT_SYSTEM_TEMPLATE_SUFFIX)
                 )
-                llm = self.chat_llm.with_structured_output(
-                    method=response_method,
-                    schema=response_schema,
-                )
-                response = await llm.ainvoke(messages)
-            else:
-                llm = self.chat_llm
-                response = await llm.ainvoke(messages)
-                response = remove_think_tags(response.content)
-                response = self.regex_object.sub(r"\g<1>", response)
+                # The 'question' here might already contain MILVUS and EXTERNAL RAG context from VectorRetrievalFunc
+                final_messages.append(HumanMessage(content=question))
+            
+            try:
+                # Convert list of LangChain message objects to list of dicts for JSON logging
+                loggable_messages = []
+                for msg in final_messages:
+                    if isinstance(msg, SystemMessage):
+                        loggable_messages.append({"role": "system", "content": msg.content})
+                    elif isinstance(msg, HumanMessage):
+                        loggable_messages.append({"role": "user", "content": msg.content})
+                    elif isinstance(msg, AIMessage):
+                         loggable_messages.append({"role": "assistant", "content": msg.content})
+                    else:
+                        loggable_messages.append({"role": "unknown", "content": str(msg.content)})
 
-            logger.info(f"AI response: {response}")
-            return response
+                logger.debug(f"GraphRetrieval.get_response: Messages being sent to LLM: {json.dumps(loggable_messages, indent=2)}")
+            except Exception as log_e: 
+                logger.warning(f"GraphRetrieval.get_response: Could not serialize messages for logging: {log_e}")
+                logger.debug(f"GraphRetrieval.get_response: Messages structure (simplified): roles={[m.__class__.__name__ for m in final_messages]}")
+
+            # self.chat_llm.invoke expects a list of BaseMessage objects or a compatible dict structure
+            return self.chat_llm.invoke(final_messages)
 
     def summarize_chat_history_and_log(
         self, stored_messages: List[BaseMessage]
