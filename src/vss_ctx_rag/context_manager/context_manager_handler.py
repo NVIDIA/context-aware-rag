@@ -180,6 +180,7 @@ class ContextManagerHandler:
                     logger.info(
                         f"Function created but not added to context manager: {function_name}"
                     )
+
         except Exception as e:
             logger.error(f"Error creating functions with FunctionFactory: {e}")
             logger.error(traceback.format_exc())
@@ -281,11 +282,6 @@ class ContextManagerHandler:
         Returns:
             Dictionary containing results from all function executions
         """
-        logger.info(f"=== DEBUG: ContextManagerHandler.call() ===")
-        logger.info(f"State: {state}")
-        logger.info(f"Available functions: {list(self._functions.keys())}")
-        logger.info(f"RAG type: {self.rag_type}")
-        
         results = {}
         with Metrics(
             "context_manager/call", "green", span_kind=Metrics.SPAN_KIND["CHAIN"]
@@ -299,14 +295,10 @@ class ContextManagerHandler:
                     asyncio.create_task(self._functions[func](call_params), name=func)
                 )
             task_results = await asyncio.gather(*tasks)
-            logger.info(f"Got {len(task_results)} results")
-            
             for index, func in enumerate(state):
                 results[func] = task_results[index]
-                logger.info(f"Function {func} result: {str(task_results[index])[:200]}...")
 
             tm.output(results)
-        logger.info(f"=== END DEBUG: ContextManagerHandler.call() ===")
         return results
 
     async def areset(self, state):
