@@ -116,13 +116,27 @@ class GraphRetrievalFunc(GraphRetrievalBaseFunc):
     async def _get_external_rag_context(self, query: str, metadata: Optional[Dict[str, Any]] = None) -> str:
         """Get context from external RAG service."""
         
-        self.external_rag_collection = [item.strip() for item in os.environ.get("EXTERNAL_RAG_COLLECTION", "").split(',') if item.strip()]
+        # Resolve collections from metadata first, then ENV
+        collection_names: list[str] = []
+        if metadata:
+            meta_collections = metadata.get("external_rag_collection") or metadata.get("collection_names")
+            if isinstance(meta_collections, list):
+                collection_names = [str(x).strip() for x in meta_collections if str(x).strip()]
+            elif isinstance(meta_collections, str):
+                collection_names = [item.strip() for item in meta_collections.split(',') if item.strip()]
+
+        if not collection_names:
+            collection_names = [item.strip() for item in os.environ.get("EXTERNAL_RAG_COLLECTION", "").split(',') if item.strip()]
+
         self.reranker_endpoint = os.environ.get("RERANKER_ENDPOINT")
         self.llm_endpoint = os.environ.get("LLM_ENDPOINT")
         self.embedding_endpoint = os.environ.get("EMBEDDING_ENDPOINT")
         
         if not self.external_rag_enabled:
             logger.info("External RAG is disabled, returning empty string")
+            return ""
+        if not collection_names:
+            logger.error("External RAG collections are required but not provided. Set metadata.collection_names or EXTERNAL_RAG_COLLECTION env var.")
             return ""
             
         with TimeMeasure("external_rag/get_context", "blue"):
@@ -144,7 +158,7 @@ class GraphRetrievalFunc(GraphRetrievalBaseFunc):
                         "reranker_top_k": 2,
                         "vdb_top_k": 10,
                         "vdb_endpoint": "http://milvus:19530",
-                        "collection_names": self.external_rag_collection,
+                        "collection_names": collection_names,
                         "enable_query_rewriting": True,
                         "enable_reranker": True,
                         "enable_citations": True,
@@ -305,8 +319,6 @@ class GraphRetrievalFunc(GraphRetrievalBaseFunc):
                 response_schema=state.get("response_schema"),
             )
 
-            logger.info(f"AI response: {response}")
-
             # External RAG enrichment (only if enabled and user provided <e>...<e>)
             if external_rag_query and self.external_rag_enabled:
                 external_context = await self._get_external_rag_context(
@@ -322,6 +334,9 @@ class GraphRetrievalFunc(GraphRetrievalBaseFunc):
                         }
                     )
                     response = unified_answer
+
+            # Log the final (possibly enriched) response
+            logger.info(f"AI response: {response}")
 
             state["response"] = response
             state["source_docs"] = raw_docs
