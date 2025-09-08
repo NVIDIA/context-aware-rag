@@ -89,6 +89,7 @@ class BatchSummarization(Function):
         {"start_index": int, "end_index": int}, ignore_extra_keys=True
     )
     metrics = SummaryMetrics()
+    uuid: str
     external_rag_query: Optional[str] = None
 
     def _extract_external_rag_query(self, text: str) -> tuple[str, str]:
