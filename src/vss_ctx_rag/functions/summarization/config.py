@@ -37,6 +37,8 @@ class SummarizationConfig(FunctionModel):
         batch_max_concurrency: int = Field(default=20, ge=1)
         top_k: Optional[int] = Field(default=5, ge=1)
         prompts: "SummarizationConfig.Prompts"
+        enrichment_prompt: Optional[str] = Field(default="")
+        external_rag_collection: Optional[str] = Field(default="")
         is_live: Optional[bool] = False
         summary_duration: Optional[int] = None
         chunk_size: Optional[int] = None

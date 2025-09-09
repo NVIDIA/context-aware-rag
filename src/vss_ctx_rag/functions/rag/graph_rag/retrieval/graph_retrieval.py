@@ -24,6 +24,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from typing import ClassVar, Dict, List
+from nvidia_rag.rag_server.main import NvidiaRAG
 
 from vss_ctx_rag.functions.rag.graph_rag.retrieval.base import GraphRetrieval
 from vss_ctx_rag.functions.rag.graph_rag.retrieval.graph_retrieval_base import (
@@ -49,6 +50,8 @@ class GraphRetrievalConfig(RetrieverConfig):
         "llm": ["llm"],
         "neo4j": ["db"],
         "arango": ["db"],
+        "vector_db": ["db"],
+        "reranker": ["reranker"],
     }
 
     params: RetrieverConfig.RetrieverParams
@@ -99,130 +102,77 @@ class GraphRetrievalFunc(GraphRetrievalBaseFunc):
 
         # External RAG configuration
         self.external_rag_enabled = os.environ.get("EXTERNAL_RAG_ENABLED", "false").lower() == "true"
-        self.external_rag_timeout = int(os.environ.get("EXTERNAL_RAG_TIMEOUT", "30"))
-        
-        logger.info(f"GraphRetrieval External RAG enabled: {self.external_rag_enabled}")
-        logger.info(f"GraphRetrieval External RAG timeout: {self.external_rag_timeout}")
+        if self.external_rag_enabled:
+            self.vector_db = self.get_tool("vector_db")
+            self.reranker_tool = self.get_tool("reranker")
+            self.nvidia_rag = NvidiaRAG()
+            collection_str = self.get_param("external_rag_collection", default="")
+            self.external_rag_collection = [item.strip() for item in collection_str.split(',') if item.strip()]
+
+    def _parse_search_results(self, search_results) -> str:
+        """Parse search results from NvidiaRAG into a single string."""
+        doc_list: List[str] = []
+        for result in search_results.results:
+            content = getattr(result, "content", "")
+            doc_list.append(content)
+        return "\n".join(doc_list)
 
     async def _get_external_rag_context(self, query: str, metadata: Optional[Dict[str, Any]] = None) -> str:
-        """Get context from external RAG service."""
-        
-        self.external_rag_collection = [item.strip() for item in os.environ.get("EXTERNAL_RAG_COLLECTION", "").split(',') if item.strip()]
-        self.reranker_endpoint = os.environ.get("RERANKER_ENDPOINT")
-        self.llm_endpoint = os.environ.get("LLM_ENDPOINT")
-        self.embedding_endpoint = os.environ.get("EMBEDDING_ENDPOINT")
+        """Get context from external RAG service using the NvidiaRAG tool."""
         
         if not self.external_rag_enabled:
             logger.info("External RAG is disabled, returning empty string")
             return ""
+
         if not self.external_rag_collection:
-            logger.error("External RAG collections are required but not provided. Set EXTERNAL_RAG_COLLECTION env var.")
+            logger.error("External RAG collections are required but not provided. Check the `external_rag_collection` parameter in the config.")
             return ""
             
         with TimeMeasure("external_rag/get_context", "blue"):
             try:
-                headers = {"Content-Type": "application/json"}
-                
-                # Check if we have a custom external RAG server
-                custom_server = os.getenv("EXTERNAL_RAG_CUSTOM_SERVER")
-                
-                if custom_server:
-                    # Use the custom format
-                    endpoint = f"{custom_server.rstrip('/')}/v1/generate"
-                    payload = {
-                        "messages": [{"role": "user", "content": query}],
-                        "use_knowledge_base": True,
-                        "temperature": 0.2,
-                        "top_p": 0.7,
-                        "max_tokens": 1024,
-                        "reranker_top_k": 2,
-                        "vdb_top_k": 10,
-                        "vdb_endpoint": "http://milvus:19530",
-                        "collection_names": self.external_rag_collection,
-                        "enable_query_rewriting": True,
-                        "enable_reranker": True,
-                        "enable_citations": True,
-                        "model": "nvidia/llama-3.3-nemotron-super-49b-v1",
-                        "reranker_model": "nvidia/llama-3.2-nv-rerankqa-1b-v2",
-                        "embedding_model": "nvidia/llama-3.2-nv-embedqa-1b-v2",
-                        "stop": [],
-                        "filter_expr": ''
-                    }
-
-                    if self.llm_endpoint:
-                        payload["llm_endpoint"] = self.llm_endpoint
-                    if self.embedding_endpoint:
-                        payload["embedding_endpoint"] = self.embedding_endpoint
-                    if self.reranker_endpoint:
-                        payload["reranker_endpoint"] = self.reranker_endpoint
+                if self.vector_db.embedding.base_url == "https://integrate.api.nvidia.com/v1":
+                    embedding_endpoint = self.vector_db.embedding.base_url + "/embeddings"
                 else:
-                    # If custom_server is not set, log an error and return empty string
-                    logger.error("EXTERNAL_RAG_ENABLED is true, but EXTERNAL_RAG_CUSTOM_SERVER is not set.")
-                    return ""
-                
-                logger.info(f"Sending request to external RAG service: {endpoint}")
-                
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(
-                        endpoint,
-                        headers=headers,
-                        json=payload,
-                        timeout=self.external_rag_timeout
-                    ) as response:
-                        if response.status != 200:
-                            logger.warning(
-                                f"External RAG service returned status {response.status}: "
-                                f"{await response.text()}"
-                            )
-                            return ""
-                        
-                        # Check content type
-                        content_type = response.headers.get('Content-Type', '')
+                    embedding_endpoint = self.vector_db.embedding.base_url
 
-                        if 'text/event-stream' in content_type:
-                            # Process streaming response
-                            full_text = ""
-                            citations_list = [] 
-                            
-                            async for line in response.content:
-                                line_decoded = line.decode('utf-8').strip()
-                                if line_decoded.startswith('data: '):
-                                    data = line_decoded[6:]
-                                    if data == '[DONE]':
-                                        break
-                                    try:
-                                        event_data = json.loads(data)
-                                        if 'choices' in event_data and len(event_data['choices']) > 0:
-                                            delta = event_data['choices'][0].get('delta', {})
-                                            if 'content' in delta and delta['content'] is not None:
-                                                full_text += delta['content']
-                                        
-                                        if 'citations' in event_data:
-                                            results = event_data['citations'].get('results', [])
-                                            for citation_item in results:
-                                                if 'content' in citation_item:
-                                                    citations_list.append(citation_item['content'])
-                                    except json.JSONDecodeError:
-                                        logger.warning(f"Failed to decode JSON from stream: {data}")
-                                        pass
-                            context = full_text
-                            if citations_list:
-                                unique_citations = list(set(citations_list))
-                                context += "\n\nCitations:\n" + "\n".join([f"- {cite}" for cite in unique_citations])
-                        else:
-                            # Standard JSON response
-                            json_response = await response.json()
-                            context = json_response.get("answer", "") 
-                            citations_data = json_response.get("citations", {})
-                            if isinstance(citations_data, dict):
-                                citation_results = citations_data.get('results', [])
-                                if citation_results:
-                                    context += "\n\nCitations:\n" + "\n".join([f"- {cite.get('content', '')}" for cite in citation_results if cite.get('content')])
-                            elif isinstance(citations_data, list):
-                                context += "\n\nCitations:\n" + "\n".join([f"- {cite}" for cite in citations_data])
-                            
-                        logger.info(f"External RAG context: {context[:100]}...")
-                        return context
+                if self.reranker_tool:
+                    search_results = await asyncio.get_running_loop().run_in_executor(
+                        None,
+                        lambda: self.nvidia_rag.search(
+                            query=query,
+                            messages=[],
+                            reranker_top_k=self.top_k,
+                            vdb_top_k=self.top_k + 1,
+                            collection_names=self.external_rag_collection,
+                            vdb_endpoint=self.vector_db.connection["uri"],
+                            enable_query_rewriting=True,
+                            enable_reranker=True,
+                            embedding_model=self.vector_db.embedding.model,
+                            embedding_endpoint=embedding_endpoint,
+                            reranker_model=self.reranker_tool.reranker.model,
+                            reranker_endpoint=self.reranker_tool.reranker.base_url,
+                        ),
+                    )
+                else:
+                    search_results = await asyncio.get_running_loop().run_in_executor(
+                        None,
+                        lambda: self.nvidia_rag.search(
+                            query=query,
+                            messages=[],
+                            reranker_top_k=self.top_k,
+                            vdb_top_k=self.top_k + 1,
+                            collection_names=self.external_rag_collection,
+                            vdb_endpoint=self.vector_db.connection["uri"],
+                            enable_query_rewriting=True,
+                            enable_reranker=False,
+                            embedding_model=self.vector_db.embedding.model,
+                            embedding_endpoint=embedding_endpoint,
+                        ),
+                    )
+                
+                context = self._parse_search_results(search_results)
+                logger.info(f"External RAG context: {context[:100]}...")
+                return context
             except Exception as e:
                 logger.error(f"Error fetching from external RAG service: {e}")
                 logger.error(traceback.format_exc())

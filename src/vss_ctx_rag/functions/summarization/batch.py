@@ -20,7 +20,7 @@ import aiohttp
 import os
 import time
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, ClassVar, List
 import traceback
 import json
 import re
@@ -51,11 +51,17 @@ from vss_ctx_rag.models.function_models import (
     register_function,
     register_function_config,
 )
+from nvidia_rag.rag_server.main import NvidiaRAG
 
 
 @register_function_config("batch_summarization")
 class BatchSummarizationConfig(SummarizationConfig):
-    pass
+    ALLOWED_TOOL_TYPES: ClassVar[Dict[str, List[str]]] = {
+        "llm": ["llm"],
+        "graph_db": ["db"],
+        "vector_db": ["db"],
+        "reranker": ["reranker"],
+    }
 
 
 @register_function(config=BatchSummarizationConfig)
@@ -92,125 +98,74 @@ class BatchSummarization(Function):
         
         return clean_text, external_rag_query
 
+    def _parse_search_results(self, search_results) -> str:
+        """Parse search results from NvidiaRAG into a single string."""
+        doc_list: List[str] = []
+        for result in search_results.results:
+            content = getattr(result, "content", "")
+            doc_list.append(content)
+        return "\n".join(doc_list)
+
     async def _get_external_rag_context(self, query: str, metadata: Optional[Dict[str, Any]] = None) -> str:
-        """Get context from external RAG service."""
-        custom_server = os.getenv("EXTERNAL_RAG_CUSTOM_SERVER")
-        self.external_rag_enabled = os.environ.get("EXTERNAL_RAG_ENABLED", "false").lower() == "true"
-        self.external_rag_timeout = int(os.environ.get("EXTERNAL_RAG_TIMEOUT", "30"))
-        self.external_rag_collection = [item.strip() for item in os.environ.get("EXTERNAL_RAG_COLLECTION", "").split(',') if item.strip()]
-        self.reranker_endpoint = os.environ.get("RERANKER_ENDPOINT")
-        self.llm_endpoint = os.environ.get("LLM_ENDPOINT")
-        self.embedding_endpoint = os.environ.get("EMBEDDING_ENDPOINT")
-
-        if not custom_server:
-            logger.error("EXTERNAL_RAG_ENABLED is true, but EXTERNAL_RAG_CUSTOM_SERVER is not set.")
+        """Get context from external RAG service using the NvidiaRAG tool."""
+        
+        if not self.external_rag_enabled:
+            logger.info("External RAG is disabled, returning empty string")
             return ""
 
-        try:
-            headers = {"Content-Type": "application/json"}
-            endpoint = f"{custom_server.rstrip('/')}/v1/generate"
+        if not self.external_rag_collection:
+            logger.error("External RAG collections are required but not provided. Check the `external_rag_collection` parameter in the config.")
+            return ""
             
-            payload = {
-            "messages": [{"role": "user", "content": query}],
-            "use_knowledge_base": True,
-            "temperature": 0.2,
-            "top_p": 0.7,
-            "max_tokens": 1024,
-            "reranker_top_k": 2,
-            "vdb_top_k": 10,
-            "vdb_endpoint": "http://milvus:19530",
-            "collection_names": self.external_rag_collection,
-            "enable_query_rewriting": True,
-            "enable_reranker": True,
-            "enable_citations": True,
-            "model": "nvidia/llama-3.3-nemotron-super-49b-v1",
-            "reranker_model": "nvidia/llama-3.2-nv-rerankqa-1b-v2",
-            "embedding_model": "nvidia/llama-3.2-nv-embedqa-1b-v2",
-            "stop": [],
-            "filter_expr": ''
-            }
+        with TimeMeasure("external_rag/get_context", "blue"):
+            try:
+                if self.vector_db.embedding.base_url == "https://integrate.api.nvidia.com/v1":
+                    embedding_endpoint = self.vector_db.embedding.base_url + "/embeddings"
+                else:
+                    embedding_endpoint = self.vector_db.embedding.base_url
 
-            if metadata:
-                payload["metadata"] = metadata
-            if self.llm_endpoint:
-                payload["llm_endpoint"] = self.llm_endpoint
-            if self.embedding_endpoint:
-                payload["embedding_endpoint"] = self.embedding_endpoint
-            if self.reranker_endpoint:
-                payload["reranker_endpoint"] = self.reranker_endpoint
-
-            logger.info(f"Sending request to: {endpoint}")
-
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    endpoint,
-                    headers=headers,
-                    json=payload,
-                    timeout=30
-                ) as response:
-                    logger.info(f"Received response status: {response.status}")
-                    if response.status != 200:
-                        logger.warning(f"Service returned status {response.status}: {await response.text()}")
-                        return ""
-                    
-                    content_type = response.headers.get('Content-Type', '')
-                    context = ""  # Initialize
-
-                    if 'text/event-stream' in content_type:
-                        logger.info("Processing text/event-stream response...")
-                        full_text = ""
-                        citations_list = []  # Still collect to see if they are sent
-                        async for line_bytes in response.content:
-                            line_decoded = line_bytes.decode('utf-8').strip()
-                            if line_decoded.startswith('data: '):
-                                data_str = line_decoded[6:]
-                                if data_str == '[DONE]':
-                                    break
-                                try:
-                                    event_data = json.loads(data_str)
-                                    if 'choices' in event_data and len(event_data['choices']) > 0:
-                                        delta = event_data['choices'][0].get('delta', {})
-                                        if 'content' in delta and delta['content'] is not None:
-                                            full_text += delta['content']
-                                    # Parse citations if present
-                                    if 'citations' in event_data:
-                                        results = event_data['citations'].get('results', [])
-                                        for citation_item in results:
-                                            if 'content' in citation_item:
-                                                citations_list.append(citation_item['content'])
-                                except json.JSONDecodeError:
-                                    logger.warning(f"Failed to decode JSON from stream: {data_str}")
-                        context = full_text  # Only the main answer
-                        if citations_list:  # Log that citations were received, but not appended
-                            logger.debug(f"Citations received (but NOT appended to final context): {list(set(citations_list))}")
-                    else:
-                        logger.info("Processing standard JSON response...")
-                        json_response = await response.json()
-                        context = json_response.get("answer", "")  # Only the main answer
-                        # Parse and log citations if present, but don't append
-                        citations_data = json_response.get("citations", {})
-                        if isinstance(citations_data, dict):
-                            citation_results = citations_data.get('results', [])
-                            if citation_results:
-                                logger.debug(f"Citations received (but NOT appended to final context): {[cite.get('content', '') for cite in citation_results if cite.get('content')]}")
-                        elif isinstance(citations_data, list):
-                            if citations_data:
-                                logger.debug(f"Citations received (but NOT appended to final context): {citations_data}")
-                    
-                    logger.info("--- Final Parsed Context (Answer Only) ---")
-                    logger.info(context[:500] + "..." if len(context) > 500 else context)
-                    logger.info("-----------------------------------------")
-                    return context
-
-        except aiohttp.ClientConnectorError as e:
-            logger.error(f"Connection Error: Could not connect to {custom_server}. Is the server running and accessible? Error: {e}")
-            return ""
-        except asyncio.TimeoutError:
-            logger.error(f"Request timed out after 30 seconds.")
-            return ""
-        except Exception as e:
-            logger.error(f"An unexpected error occurred: {e}", exc_info=True)
-            return ""
+                if self.reranker_tool:
+                    search_results = await asyncio.get_running_loop().run_in_executor(
+                        None,
+                        lambda: self.nvidia_rag.search(
+                            query=query,
+                            messages=[],
+                            # Setting top_k to a reasonable default for summarization context
+                            reranker_top_k=5,
+                            vdb_top_k=10,
+                            collection_names=self.external_rag_collection,
+                            vdb_endpoint=self.vector_db.connection["uri"],
+                            enable_query_rewriting=True,
+                            enable_reranker=True,
+                            embedding_model=self.vector_db.embedding.model,
+                            embedding_endpoint=embedding_endpoint,
+                            reranker_model=self.reranker_tool.reranker.model,
+                            reranker_endpoint=self.reranker_tool.reranker.base_url,
+                        ),
+                    )
+                else:
+                    search_results = await asyncio.get_running_loop().run_in_executor(
+                        None,
+                        lambda: self.nvidia_rag.search(
+                            query=query,
+                            messages=[],
+                            vdb_top_k=10,
+                            collection_names=self.external_rag_collection,
+                            vdb_endpoint=self.vector_db.connection["uri"],
+                            enable_query_rewriting=True,
+                            enable_reranker=False,
+                            embedding_model=self.vector_db.embedding.model,
+                            embedding_endpoint=embedding_endpoint,
+                        ),
+                    )
+                
+                context = self._parse_search_results(search_results)
+                logger.info(f"External RAG context: {context[:100]}...")
+                return context
+            except Exception as e:
+                logger.error(f"Error fetching from external RAG service: {e}")
+                logger.error(traceback.format_exc())
+                return ""
 
     def setup(self):
         # fixed params
@@ -220,7 +175,14 @@ class BatchSummarization(Function):
         
         # Store external RAG query for later use, but use clean prompt for batch processing
         self.external_rag_query = None
-        if os.environ.get("EXTERNAL_RAG_ENABLED", "false").lower() == "true":
+        self.external_rag_enabled = os.environ.get("EXTERNAL_RAG_ENABLED", "false").lower() == "true"
+
+        if self.external_rag_enabled:
+            self.vector_db = self.get_tool("vector_db")
+            self.reranker_tool = self.get_tool("reranker")
+            self.nvidia_rag = NvidiaRAG()
+            collection_str = self.get_param("external_rag_collection", default="")
+            self.external_rag_collection = [item.strip() for item in collection_str.split(',') if item.strip()]
             clean_prompt, external_rag_query = self._extract_external_rag_query(prompts.get("caption_summarization"))
             if external_rag_query:
                 self.external_rag_query = external_rag_query
