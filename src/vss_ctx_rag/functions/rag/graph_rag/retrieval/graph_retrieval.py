@@ -39,6 +39,7 @@ from vss_ctx_rag.utils.globals import (
 from vss_ctx_rag.functions.rag.config import RetrieverConfig
 from vss_ctx_rag.models.state_models import RetrieverFunctionState
 from vss_ctx_rag.utils.utils import extract_external_rag_query
+from vss_ctx_rag.utils.external_rag_client import ExternalRAGClient
 
 
 DEFAULT_GRAPH_ENRICHMENT_PROMPT = """You are providing a response from multiple sources.
@@ -123,84 +124,12 @@ class GraphRetrievalFunc(GraphRetrievalBaseFunc):
             self.external_rag_collection = [
                 item.strip() for item in collection_str.split(",") if item.strip()
             ]
-
-    def _parse_search_results(self, search_results) -> str:
-        """Parse search results from NvidiaRAG into a single string."""
-        doc_list: List[str] = []
-        for result in search_results.results:
-            content = getattr(result, "content", "")
-            doc_list.append(content)
-        return "\n".join(doc_list)
-
-    async def _get_external_rag_context(
-        self, query: str, metadata: Optional[Dict[str, Any]] = None
-    ) -> str:
-        """Get context from external RAG service using the NvidiaRAG tool."""
-
-        if not self.external_rag_enabled:
-            logger.info("External RAG is disabled, returning empty string")
-            return ""
-
-        if not self.external_rag_collection:
-            logger.error(
-                "External RAG collections are required but not provided. Check the `external_rag_collection` parameter in the config."
+            self.external_rag_client = ExternalRAGClient(
+                self.nvidia_rag,
+                self.vector_db,
+                self.reranker_tool,
+                self.external_rag_collection,
             )
-            return ""
-
-        with TimeMeasure("external_rag/get_context", "blue"):
-            try:
-                if (
-                    self.vector_db.embedding.base_url
-                    == "https://integrate.api.nvidia.com/v1"
-                ):
-                    embedding_endpoint = (
-                        self.vector_db.embedding.base_url + "/embeddings"
-                    )
-                else:
-                    embedding_endpoint = self.vector_db.embedding.base_url
-
-                if self.reranker_tool:
-                    search_results = await asyncio.get_running_loop().run_in_executor(
-                        None,
-                        lambda: self.nvidia_rag.search(
-                            query=query,
-                            messages=[],
-                            reranker_top_k=self.top_k,
-                            vdb_top_k=self.top_k + 1,
-                            collection_names=self.external_rag_collection,
-                            vdb_endpoint=self.vector_db.connection["uri"],
-                            enable_query_rewriting=True,
-                            enable_reranker=True,
-                            embedding_model=self.vector_db.embedding.model,
-                            embedding_endpoint=embedding_endpoint,
-                            reranker_model=self.reranker_tool.reranker.model,
-                            reranker_endpoint=self.reranker_tool.reranker.base_url,
-                        ),
-                    )
-                else:
-                    search_results = await asyncio.get_running_loop().run_in_executor(
-                        None,
-                        lambda: self.nvidia_rag.search(
-                            query=query,
-                            messages=[],
-                            reranker_top_k=self.top_k,
-                            vdb_top_k=self.top_k + 1,
-                            collection_names=self.external_rag_collection,
-                            vdb_endpoint=self.vector_db.connection["uri"],
-                            enable_query_rewriting=True,
-                            enable_reranker=False,
-                            embedding_model=self.vector_db.embedding.model,
-                            embedding_endpoint=embedding_endpoint,
-                        ),
-                    )
-
-                context = self._parse_search_results(search_results)
-                logger.info(f"External RAG context: {context[:100]}...")
-                return context
-            except Exception as e:
-                logger.error(f"Error fetching from external RAG service: {e}")
-                logger.error(traceback.format_exc())
-                return ""
 
     async def acall(self, state: RetrieverFunctionState) -> RetrieverFunctionState:
         """
@@ -262,8 +191,10 @@ class GraphRetrievalFunc(GraphRetrievalBaseFunc):
 
             # External RAG enrichment (only if enabled and user provided <e>...<e>)
             if external_rag_query and self.external_rag_enabled:
-                external_context = await self._get_external_rag_context(
-                    external_rag_query
+                external_context = await self.external_rag_client.get_context(
+                    external_rag_query,
+                    reranker_top_k=self.top_k,
+                    vdb_top_k=self.top_k + 1,
                 )
                 if external_context:
                     enrichment_prompt = ChatPromptTemplate.from_template(
