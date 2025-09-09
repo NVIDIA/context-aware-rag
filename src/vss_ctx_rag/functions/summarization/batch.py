@@ -16,14 +16,11 @@
 """summarization.py: File contains Function class"""
 
 import asyncio
-import aiohttp
 import os
 import time
 from pathlib import Path
 from typing import Optional, Dict, Any, ClassVar, List
 import traceback
-import json
-import re
 
 from langchain_community.callbacks import get_openai_callback
 from langchain_core.output_parsers import StrOutputParser
@@ -45,6 +42,7 @@ from vss_ctx_rag.utils.utils import (
     remove_think_tags,
     call_token_safe,
     add_timestamps_to_doc,
+    extract_external_rag_query,
 )
 from vss_ctx_rag.functions.summarization.config import SummarizationConfig
 from vss_ctx_rag.models.function_models import (
@@ -97,17 +95,6 @@ class BatchSummarization(Function):
     uuid: str
     external_rag_query: Optional[str] = None
     enrichment_prompt: str
-
-    def _extract_external_rag_query(self, text: str) -> tuple[str, str]:
-        """Extract external RAG query from text marked with <e> tags."""
-        pattern = r'<e>(.*?)<e>'
-        # Remove the tagged content and get clean text
-        clean_text = re.sub(pattern, '', text, flags=re.DOTALL).strip()
-        # Extract the content between tags
-        matches = re.findall(pattern, text, re.DOTALL)
-        external_rag_query = matches[0] if matches else ''
-        
-        return clean_text, external_rag_query
 
     def _parse_search_results(self, search_results) -> str:
         """Parse search results from NvidiaRAG into a single string."""
@@ -194,7 +181,7 @@ class BatchSummarization(Function):
             self.nvidia_rag = NvidiaRAG()
             collection_str = self.get_param("external_rag_collection", default="")
             self.external_rag_collection = [item.strip() for item in collection_str.split(',') if item.strip()]
-            clean_prompt, external_rag_query = self._extract_external_rag_query(prompts.get("caption_summarization"))
+            clean_prompt, external_rag_query = extract_external_rag_query(prompts.get("caption_summarization"))
             if external_rag_query:
                 self.external_rag_query = external_rag_query
                 logger.info(f"External RAG query stored for final aggregation: {external_rag_query}")

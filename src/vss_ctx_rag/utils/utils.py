@@ -228,3 +228,16 @@ async def call_token_safe(input_data, pipeline, retries_left):
 
 def format_docs(docs):
     return "\n\n".join(doc.page_content for doc in docs)
+
+def extract_external_rag_query(text: str) -> tuple[str, str]:
+    """Extract external RAG query from text marked with <e> tags.
+    Returns (text_without_tags, external_rag_query)"""
+    import re
+    pattern = r'<e>(.*?)<e>'
+    # Remove the tagged content and get clean text
+    clean_text = re.sub(pattern, '', text, flags=re.DOTALL).strip()
+    # Extract the content between tags
+    matches = re.findall(pattern, text, re.DOTALL)
+    external_rag_query = matches[0] if matches else ''
+    
+    return clean_text, external_rag_query

@@ -15,9 +15,6 @@
 
 import asyncio
 import traceback
-import os
-import aiohttp
-import json
 from typing import Optional, Dict, Any
 
 from langchain_core.messages import AIMessage, HumanMessage
@@ -42,6 +39,7 @@ from vss_ctx_rag.utils.globals import (
 )
 from vss_ctx_rag.functions.rag.config import RetrieverConfig
 from vss_ctx_rag.models.state_models import RetrieverFunctionState
+from vss_ctx_rag.utils.utils import extract_external_rag_query
 
 
 DEFAULT_GRAPH_ENRICHMENT_PROMPT = """You are providing a response from multiple sources.
@@ -190,19 +188,6 @@ class GraphRetrievalFunc(GraphRetrievalBaseFunc):
                 logger.error(traceback.format_exc())
                 return ""
 
-    def _extract_external_rag_query(self, text: str) -> tuple[str, str]:
-        """Extract external RAG query from text marked with <e> tags.
-        Returns (text_without_tags, external_rag_query)"""
-        import re
-        pattern = r'<e>(.*?)<e>'
-        # Remove the tagged content and get clean text
-        clean_text = re.sub(pattern, '', text).strip()
-        # Extract the content between tags
-        matches = re.findall(pattern, text)
-        external_rag_query = matches[0] if matches else ''
-        
-        return clean_text, external_rag_query
-
     async def acall(self, state: RetrieverFunctionState) -> RetrieverFunctionState:
         """
         Call the GraphRetrieval class.
@@ -226,7 +211,7 @@ class GraphRetrievalFunc(GraphRetrievalBaseFunc):
                 return state
 
             # Extract external RAG query and clean question
-            clean_question, external_rag_query = self._extract_external_rag_query(question)
+            clean_question, external_rag_query = extract_external_rag_query(question)
 
             with Metrics("GraphRetrieval/HumanMessage", "blue"):
                 user_message = HumanMessage(content=clean_question)
