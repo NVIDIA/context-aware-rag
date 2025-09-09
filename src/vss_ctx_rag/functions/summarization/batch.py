@@ -104,21 +104,30 @@ class BatchSummarization(Function):
             doc_list.append(content)
         return "\n".join(doc_list)
 
-    async def _get_external_rag_context(self, query: str, metadata: Optional[Dict[str, Any]] = None) -> str:
+    async def _get_external_rag_context(
+        self, query: str, metadata: Optional[Dict[str, Any]] = None
+    ) -> str:
         """Get context from external RAG service using the NvidiaRAG tool."""
-        
+
         if not self.external_rag_enabled:
             logger.info("External RAG is disabled, returning empty string")
             return ""
 
         if not self.external_rag_collection:
-            logger.error("External RAG collections are required but not provided. Check the `external_rag_collection` parameter in the config.")
+            logger.error(
+                "External RAG collections are required but not provided. Check the `external_rag_collection` parameter in the config."
+            )
             return ""
-            
+
         with TimeMeasure("external_rag/get_context", "blue"):
             try:
-                if self.vector_db.embedding.base_url == "https://integrate.api.nvidia.com/v1":
-                    embedding_endpoint = self.vector_db.embedding.base_url + "/embeddings"
+                if (
+                    self.vector_db.embedding.base_url
+                    == "https://integrate.api.nvidia.com/v1"
+                ):
+                    embedding_endpoint = (
+                        self.vector_db.embedding.base_url + "/embeddings"
+                    )
                 else:
                     embedding_endpoint = self.vector_db.embedding.base_url
 
@@ -156,7 +165,7 @@ class BatchSummarization(Function):
                             embedding_endpoint=embedding_endpoint,
                         ),
                     )
-                
+
                 context = self._parse_search_results(search_results)
                 logger.info(f"External RAG context: {context[:100]}...")
                 return context
@@ -169,31 +178,43 @@ class BatchSummarization(Function):
         # fixed params
         prompts = self.get_param("prompts")
         # Enrichment prompt from config. The default is set in config.yaml
-        self.enrichment_prompt = self.get_param("enrichment_prompt", default=DEFAULT_BATCH_ENRICHMENT_PROMPT)
-        
+        self.enrichment_prompt = self.get_param(
+            "enrichment_prompt", default=DEFAULT_BATCH_ENRICHMENT_PROMPT
+        )
+
         # Store external RAG query for later use, but use clean prompt for batch processing
         self.external_rag_query = None
-        self.external_rag_enabled = self.get_param("external_rag_enabled", default=False)
+        self.external_rag_enabled = self.get_param(
+            "external_rag_enabled", default=False
+        )
 
         if self.external_rag_enabled:
             self.vector_db = self.get_tool("vector_db")
             self.reranker_tool = self.get_tool("reranker")
             self.nvidia_rag = NvidiaRAG()
             collection_str = self.get_param("external_rag_collection", default="")
-            self.external_rag_collection = [item.strip() for item in collection_str.split(',') if item.strip()]
-            clean_prompt, external_rag_query = extract_external_rag_query(prompts.get("caption_summarization"))
+            self.external_rag_collection = [
+                item.strip() for item in collection_str.split(",") if item.strip()
+            ]
+            clean_prompt, external_rag_query = extract_external_rag_query(
+                prompts.get("caption_summarization")
+            )
             if external_rag_query:
                 self.external_rag_query = external_rag_query
-                logger.info(f"External RAG query stored for final aggregation: {external_rag_query}")
+                logger.info(
+                    f"External RAG query stored for final aggregation: {external_rag_query}"
+                )
                 # Use clean prompt for batch processing (without <e> tags)
                 prompts = prompts.copy()
                 prompts["caption_summarization"] = clean_prompt
                 logger.info("Using clean caption prompt for batch processing")
             else:
-                logger.info("No external RAG query found in caption summarization prompt")
+                logger.info(
+                    "No external RAG query found in caption summarization prompt"
+                )
         else:
             logger.info("EXTERNAL_RAG_ENABLED is not set to 'true'")
-        
+
         self.batch_prompt = ChatPromptTemplate.from_messages(
             [
                 ("system", prompts.get("caption_summarization")),
@@ -465,26 +486,51 @@ class BatchSummarization(Function):
                             result = await call_token_safe(
                                 batches, self.aggregation_pipeline, self.recursion_limit
                             )
-                            
+
                             # Process external RAG at final aggregation if query was stored
                             if self.external_rag_query:
-                                logger.info(f"Processing external RAG at final aggregation with query: {self.external_rag_query}")
+                                logger.info(
+                                    f"Processing external RAG at final aggregation with query: {self.external_rag_query}"
+                                )
                                 try:
-                                    external_context = await self._get_external_rag_context(self.external_rag_query)
+                                    external_context = (
+                                        await self._get_external_rag_context(
+                                            self.external_rag_query
+                                        )
+                                    )
                                     if external_context:
-                                        enrichment_prompt = ChatPromptTemplate.from_template(self.enrichment_prompt)
-                                        enriched_pipeline = enrichment_prompt | self.get_tool(LLM_TOOL_NAME) | self.output_parser
-                                        result = await enriched_pipeline.ainvoke({
-                                            "video_summary": result,
-                                            "external_context": external_context
-                                        })
-                                        logger.info("Video summary enriched with external RAG context successfully")
+                                        enrichment_prompt = (
+                                            ChatPromptTemplate.from_template(
+                                                self.enrichment_prompt
+                                            )
+                                        )
+                                        enriched_pipeline = (
+                                            enrichment_prompt
+                                            | self.get_tool(LLM_TOOL_NAME)
+                                            | self.output_parser
+                                        )
+                                        result = await enriched_pipeline.ainvoke(
+                                            {
+                                                "video_summary": result,
+                                                "external_context": external_context,
+                                            }
+                                        )
+                                        logger.info(
+                                            "Video summary enriched with external RAG context successfully"
+                                        )
                                     else:
-                                        logger.info("External RAG returned no context, using original summary")
+                                        logger.info(
+                                            "External RAG returned no context, using original summary"
+                                        )
                                 except Exception as e:
-                                    logger.error(f"External RAG enrichment failed: {e}", exc_info=True)
-                                    logger.info("Continuing with original summary without enrichment")
-                            
+                                    logger.error(
+                                        f"External RAG enrichment failed: {e}",
+                                        exc_info=True,
+                                    )
+                                    logger.info(
+                                        "Continuing with original summary without enrichment"
+                                    )
+
                             state["result"] = result
                         logger.info("Summary Aggregation Done")
                         self.metrics.aggregation_tokens = cb.total_tokens

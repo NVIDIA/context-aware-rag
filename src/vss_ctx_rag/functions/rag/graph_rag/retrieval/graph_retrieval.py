@@ -107,16 +107,22 @@ class GraphRetrievalFunc(GraphRetrievalBaseFunc):
         self.image = self.get_param("image", default=False)
 
         # Enrichment prompt from config. The default is set in config.yaml
-        self.enrichment_prompt: str = self.get_param("enrichment_prompt", default=DEFAULT_GRAPH_ENRICHMENT_PROMPT)
+        self.enrichment_prompt: str = self.get_param(
+            "enrichment_prompt", default=DEFAULT_GRAPH_ENRICHMENT_PROMPT
+        )
 
         # External RAG configuration
-        self.external_rag_enabled = self.get_param("external_rag_enabled", default=False)
+        self.external_rag_enabled = self.get_param(
+            "external_rag_enabled", default=False
+        )
         if self.external_rag_enabled:
             self.vector_db = self.get_tool("vector_db")
             self.reranker_tool = self.get_tool("reranker")
             self.nvidia_rag = NvidiaRAG()
             collection_str = self.get_param("external_rag_collection", default="")
-            self.external_rag_collection = [item.strip() for item in collection_str.split(',') if item.strip()]
+            self.external_rag_collection = [
+                item.strip() for item in collection_str.split(",") if item.strip()
+            ]
 
     def _parse_search_results(self, search_results) -> str:
         """Parse search results from NvidiaRAG into a single string."""
@@ -126,21 +132,30 @@ class GraphRetrievalFunc(GraphRetrievalBaseFunc):
             doc_list.append(content)
         return "\n".join(doc_list)
 
-    async def _get_external_rag_context(self, query: str, metadata: Optional[Dict[str, Any]] = None) -> str:
+    async def _get_external_rag_context(
+        self, query: str, metadata: Optional[Dict[str, Any]] = None
+    ) -> str:
         """Get context from external RAG service using the NvidiaRAG tool."""
-        
+
         if not self.external_rag_enabled:
             logger.info("External RAG is disabled, returning empty string")
             return ""
 
         if not self.external_rag_collection:
-            logger.error("External RAG collections are required but not provided. Check the `external_rag_collection` parameter in the config.")
+            logger.error(
+                "External RAG collections are required but not provided. Check the `external_rag_collection` parameter in the config."
+            )
             return ""
-            
+
         with TimeMeasure("external_rag/get_context", "blue"):
             try:
-                if self.vector_db.embedding.base_url == "https://integrate.api.nvidia.com/v1":
-                    embedding_endpoint = self.vector_db.embedding.base_url + "/embeddings"
+                if (
+                    self.vector_db.embedding.base_url
+                    == "https://integrate.api.nvidia.com/v1"
+                ):
+                    embedding_endpoint = (
+                        self.vector_db.embedding.base_url + "/embeddings"
+                    )
                 else:
                     embedding_endpoint = self.vector_db.embedding.base_url
 
@@ -178,7 +193,7 @@ class GraphRetrievalFunc(GraphRetrievalBaseFunc):
                             embedding_endpoint=embedding_endpoint,
                         ),
                     )
-                
+
                 context = self._parse_search_results(search_results)
                 logger.info(f"External RAG context: {context[:100]}...")
                 return context
@@ -197,7 +212,7 @@ class GraphRetrievalFunc(GraphRetrievalBaseFunc):
         Returns:
             State of the function.
         """
-        
+
         try:
             question = state.get("question", "").strip()
             if not question:
@@ -247,9 +262,13 @@ class GraphRetrievalFunc(GraphRetrievalBaseFunc):
 
             # External RAG enrichment (only if enabled and user provided <e>...<e>)
             if external_rag_query and self.external_rag_enabled:
-                external_context = await self._get_external_rag_context(external_rag_query)
+                external_context = await self._get_external_rag_context(
+                    external_rag_query
+                )
                 if external_context:
-                    enrichment_prompt = ChatPromptTemplate.from_template(self.enrichment_prompt)
+                    enrichment_prompt = ChatPromptTemplate.from_template(
+                        self.enrichment_prompt
+                    )
                     final_chain = enrichment_prompt | self.chat_llm | self.output_parser
                     unified_answer = await final_chain.ainvoke(
                         {
