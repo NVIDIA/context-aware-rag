@@ -44,6 +44,18 @@ from vss_ctx_rag.functions.rag.config import RetrieverConfig
 from vss_ctx_rag.models.state_models import RetrieverFunctionState
 
 
+DEFAULT_GRAPH_ENRICHMENT_PROMPT = """You are providing a response from multiple sources.
+
+GRAPH RAG CONTENT:
+{original_response}
+
+EXTERNAL RAG CONTENT:
+{external_context}
+
+Combine them into a single, coherent answer, preserving important details from both.
+Do not include any introductory phrases, notes, explanations, or comments about how the inputs were combined. Do not reference the video summary or external context. Only provide the enriched summary itself."""
+
+
 @register_function_config("graph_retrieval")
 class GraphRetrievalConfig(RetrieverConfig):
     ALLOWED_TOOL_TYPES: ClassVar[Dict[str, List[str]]] = {
@@ -98,7 +110,7 @@ class GraphRetrievalFunc(GraphRetrievalBaseFunc):
         self.image = self.get_param("image", default=False)
 
         # Enrichment prompt from config. The default is set in config.yaml
-        self.enrichment_prompt: str = self.get_param("enrichment_prompt")
+        self.enrichment_prompt: str = self.get_param("enrichment_prompt", default=DEFAULT_GRAPH_ENRICHMENT_PROMPT)
 
         # External RAG configuration
         self.external_rag_enabled = self.get_param("external_rag_enabled", default=False)
