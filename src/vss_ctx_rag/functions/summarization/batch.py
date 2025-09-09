@@ -53,18 +53,6 @@ from vss_ctx_rag.models.function_models import (
 )
 
 
-DEFAULT_BATCH_ENRICHMENT_PROMPT = (
-    "You are tasked with enriching a video summary with additional context that provides relevant information. "
-    "The video summary has specific structure with timestamps and categories - maintain this structure. "
-    "Integrate the additional context naturally where relevant throughout the summary, enhancing descriptions and explanations. "
-    "Do not just append it as a separate section - weave it in contextually where it makes sense.\n\n"
-    "Video Summary:\n{video_summary}\n\n"
-    "Additional Context:\n{external_context}\n\n"
-    "Instructions: Enhance the video summary by incorporating the additional context information where it's relevant and useful."
-    "Do not include any introductory phrases, notes, explanations, or comments about how the inputs were combined. Do not reference the video summary or external context. Only provide the enriched summary itself."
-)
-
-
 @register_function_config("batch_summarization")
 class BatchSummarizationConfig(SummarizationConfig):
     pass
@@ -91,6 +79,7 @@ class BatchSummarization(Function):
     metrics = SummaryMetrics()
     uuid: str
     external_rag_query: Optional[str] = None
+    enrichment_prompt: str
 
     def _extract_external_rag_query(self, text: str) -> tuple[str, str]:
         """Extract external RAG query from text marked with <e> tags."""
@@ -226,6 +215,8 @@ class BatchSummarization(Function):
     def setup(self):
         # fixed params
         prompts = self.get_param("prompts")
+        # Enrichment prompt from config. The default is set in config.yaml
+        self.enrichment_prompt = self.get_param("enrichment_prompt")
         
         # Store external RAG query for later use, but use clean prompt for batch processing
         self.external_rag_query = None
@@ -521,9 +512,7 @@ class BatchSummarization(Function):
                                 try:
                                     external_context = await self._get_external_rag_context(self.external_rag_query)
                                     if external_context:
-                                        custom_prompt = os.getenv("BATCH_SUMMARIZATION_ENRICHMENT_PROMPT", "").strip()
-                                        prompt_template = custom_prompt if custom_prompt else DEFAULT_BATCH_ENRICHMENT_PROMPT
-                                        enrichment_prompt = ChatPromptTemplate.from_template(prompt_template)
+                                        enrichment_prompt = ChatPromptTemplate.from_template(self.enrichment_prompt)
                                         enriched_pipeline = enrichment_prompt | self.get_tool(LLM_TOOL_NAME) | self.output_parser
                                         result = await enriched_pipeline.ainvoke({
                                             "video_summary": result,
