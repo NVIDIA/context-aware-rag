@@ -15,12 +15,11 @@
 
 import asyncio
 import traceback
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, ClassVar, List
 
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
-from typing import ClassVar, Dict, List
 from nvidia_rag.rag_server.main import NvidiaRAG
 
 from vss_ctx_rag.functions.rag.graph_rag.retrieval.base import GraphRetrieval
