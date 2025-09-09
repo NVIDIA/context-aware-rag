@@ -101,7 +101,7 @@ class GraphRetrievalFunc(GraphRetrievalBaseFunc):
         self.enrichment_prompt: str = self.get_param("enrichment_prompt")
 
         # External RAG configuration
-        self.external_rag_enabled = os.environ.get("EXTERNAL_RAG_ENABLED", "false").lower() == "true"
+        self.external_rag_enabled = self.get_param("external_rag_enabled", default=False)
         if self.external_rag_enabled:
             self.vector_db = self.get_tool("vector_db")
             self.reranker_tool = self.get_tool("reranker")

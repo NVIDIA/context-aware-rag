@@ -39,6 +39,7 @@ class SummarizationConfig(FunctionModel):
         prompts: "SummarizationConfig.Prompts"
         enrichment_prompt: Optional[str] = Field(default="")
         external_rag_collection: Optional[str] = Field(default="")
+        external_rag_enabled: Optional[bool] = Field(default=False)
         is_live: Optional[bool] = False
         summary_duration: Optional[int] = None
         chunk_size: Optional[int] = None
