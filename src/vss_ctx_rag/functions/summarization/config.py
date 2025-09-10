@@ -24,7 +24,6 @@ from vss_ctx_rag.utils.globals import (
     DEFAULT_SUMM_TIMEOUT_SEC,
     DEFAULT_SUMM_RECURSION_LIMIT,
 )
-from vss_ctx_rag.functions.rag.config import ExternalRAGParams
 
 
 class SummarizationConfig(FunctionModel):
@@ -44,7 +43,8 @@ class SummarizationConfig(FunctionModel):
         batch_max_concurrency: int = Field(default=20, ge=1)
         top_k: Optional[int] = Field(default=5, ge=1)
         prompts: "SummarizationConfig.Prompts"
-        external_rag: Optional[ExternalRAGParams] = Field(default=None)
+        enrichment_prompt: Optional[str] = Field(default="")
+        external_rag_enabled: Optional[bool] = Field(default=False)
         is_live: Optional[bool] = False
         uuid: Optional[str] = Field(default="default")
 

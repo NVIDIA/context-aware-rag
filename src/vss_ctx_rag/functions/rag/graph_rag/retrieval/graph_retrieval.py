@@ -60,8 +60,7 @@ class GraphRetrievalConfig(RetrieverConfig):
         "llm": ["llm"],
         "neo4j": ["db"],
         "arango": ["db"],
-        "vector_db": ["db"],
-        "reranker": ["reranker"],
+        "external_rag": ["external_rag"],
     }
 
     params: RetrieverConfig.RetrieverParams
@@ -113,29 +112,11 @@ class GraphRetrievalFunc(GraphRetrievalBaseFunc):
         )
 
         # External RAG configuration
-        external_rag_params = self.get_param("external_rag")
-        if external_rag_params:
-            self.external_rag_enabled = external_rag_params.get("enabled", False)
-            collection_str = external_rag_params.get("collection", "")
-            self.enrichment_prompt = external_rag_params.get(
-                "enrichment_prompt", DEFAULT_GRAPH_ENRICHMENT_PROMPT
-            )
-        else:
-            self.external_rag_enabled = False
-
+        self.external_rag_enabled = self.get_param(
+            "external_rag_enabled", default=False
+        )
         if self.external_rag_enabled:
-            self.vector_db = self.get_tool("vector_db")
-            self.reranker_tool = self.get_tool("reranker")
-            self.nvidia_rag = NvidiaRAG()
-            self.external_rag_collection = [
-                item.strip() for item in collection_str.split(",") if item.strip()
-            ]
-            self.external_rag_client = ExternalRAGClient(
-                self.nvidia_rag,
-                self.vector_db,
-                self.reranker_tool,
-                self.external_rag_collection,
-            )
+            self.external_rag = self.get_tool("external_rag")
 
     async def acall(self, state: RetrieverFunctionState) -> RetrieverFunctionState:
         """
@@ -197,7 +178,7 @@ class GraphRetrievalFunc(GraphRetrievalBaseFunc):
 
             # External RAG enrichment (only if enabled and user provided <e>...<e>)
             if external_rag_query and self.external_rag_enabled:
-                external_context = await self.external_rag_client.get_context(
+                external_context = await self.external_rag.query(
                     external_rag_query,
                     reranker_top_k=self.top_k,
                     vdb_top_k=self.top_k + 1,

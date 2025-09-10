@@ -13,32 +13,51 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""external_rag_client.py: File contains ExternalRAGClient class"""
+"""external_rag_tool.py: File contains ExternalRAGTool class"""
 
 import asyncio
 import traceback
-from typing import Any, List
+from typing import Any, ClassVar, Dict, List
 
 from nvidia_rag.rag_server.main import NvidiaRAG
+from pydantic import Field
 
-from vss_ctx_rag.utils.ctx_rag_logger import logger, Metrics
+from vss_ctx_rag.base.tool import Tool
+from vss_ctx_rag.models.tool_models import (
+    ToolBaseModel,
+    register_tool,
+    register_tool_config,
+)
+from vss_ctx_rag.utils.ctx_rag_logger import Metrics, logger
 
 
-class ExternalRAGClient:
-    """Client for interacting with an external RAG service."""
+@register_tool_config("external_rag")
+class ExternalRAGToolConfig(ToolBaseModel):
+    """External RAG Tool configuration."""
 
-    def __init__(
-        self,
-        nvidia_rag: NvidiaRAG,
-        vector_db: Any,
-        reranker_tool: Any,
-        external_rag_collection: List[str],
-    ):
-        """Initialize the ExternalRAGClient."""
-        self.nvidia_rag = nvidia_rag
-        self.vector_db = vector_db
-        self.reranker_tool = reranker_tool
-        self.external_rag_collection = external_rag_collection
+    ALLOWED_TOOL_TYPES: ClassVar[Dict[str, List[str]]] = {
+        "vector_db": ["db"],
+        "reranker": ["reranker"],
+    }
+    collection: str = Field(default="")
+
+
+@register_tool(config=ExternalRAGToolConfig)
+class ExternalRAGTool(Tool):
+    """Tool for interacting with an external RAG service."""
+
+    def __init__(self, name="external_rag", config=None, tools=None) -> None:
+        """Initialize the ExternalRAGTool."""
+        super().__init__(name, config, tools)
+        self.update_tool(self.config, tools)
+
+    def update_tool(self, config, tools=None):
+        """Update the tool with new configuration."""
+        self.config = config
+        self.vector_db = tools.get("vector_db")
+        self.reranker_tool = tools.get("reranker")
+        self.nvidia_rag = NvidiaRAG()
+        self.collection = self.config.collection
 
     @staticmethod
     def _parse_search_results(search_results) -> str:
@@ -50,16 +69,14 @@ class ExternalRAGClient:
                 doc_list.append(content)
         return "\n".join(doc_list)
 
-    async def get_context(
-        self, query: str, reranker_top_k: int, vdb_top_k: int
-    ) -> str:
-        """Get context from external RAG service using the NvidiaRAG tool."""
-        if not self.external_rag_collection:
-            logger.error("External RAG collections are required but not provided.")
+    async def query(self, query: str, reranker_top_k: int, vdb_top_k: int) -> str:
+        """Query the external RAG service."""
+        if not self.collection:
+            logger.error("External RAG collection is required but not provided.")
             return ""
 
         with Metrics(
-            "external_rag/get_context", "blue", span_kind=Metrics.SPAN_KIND["CHAIN"]
+            "external_rag/query", "blue", span_kind=Metrics.SPAN_KIND["CHAIN"]
         ) as tm:
             tm.input(
                 {
@@ -84,7 +101,9 @@ class ExternalRAGClient:
                     "messages": [],
                     "reranker_top_k": reranker_top_k,
                     "vdb_top_k": vdb_top_k,
-                    "collection_names": self.external_rag_collection,
+                    "collection_names": [
+                        item.strip() for item in self.collection.split(",") if item.strip()
+                    ],
                     "vdb_endpoint": self.vector_db.connection["uri"],
                     "enable_query_rewriting": True,
                     "embedding_model": self.vector_db.embedding.model,

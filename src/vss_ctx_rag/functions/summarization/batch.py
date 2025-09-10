@@ -69,8 +69,7 @@ class BatchSummarizationConfig(SummarizationConfig):
     ALLOWED_TOOL_TYPES: ClassVar[Dict[str, List[str]]] = {
         "llm": ["llm"],
         "graph_db": ["db"],
-        "vector_db": ["db"],
-        "reranker": ["reranker"],
+        "external_rag": ["external_rag"],
     }
 
 
@@ -107,30 +106,11 @@ class BatchSummarization(Function):
 
         # Store external RAG query for later use, but use clean prompt for batch processing
         self.external_rag_query = None
-
-        external_rag_params = self.get_param("external_rag")
-        if external_rag_params:
-            self.external_rag_enabled = external_rag_params.get("enabled", False)
-            collection_str = external_rag_params.get("collection", "")
-            self.enrichment_prompt = external_rag_params.get(
-                "enrichment_prompt", DEFAULT_BATCH_ENRICHMENT_PROMPT
-            )
-        else:
-            self.external_rag_enabled = False
-
+        self.external_rag_enabled = self.get_param(
+            "external_rag_enabled", default=False
+        )
         if self.external_rag_enabled:
-            self.vector_db = self.get_tool("vector_db")
-            self.reranker_tool = self.get_tool("reranker")
-            self.nvidia_rag = NvidiaRAG()
-            self.external_rag_collection = [
-                item.strip() for item in collection_str.split(",") if item.strip()
-            ]
-            self.external_rag_client = ExternalRAGClient(
-                self.nvidia_rag,
-                self.vector_db,
-                self.reranker_tool,
-                self.external_rag_collection,
-            )
+            self.external_rag = self.get_tool("external_rag")
             clean_prompt, external_rag_query = extract_external_rag_query(
                 prompts.get("caption_summarization")
             )
@@ -429,7 +409,7 @@ class BatchSummarization(Function):
                                 )
                                 try:
                                     external_context = (
-                                        await self.external_rag_client.get_context(
+                                        await self.external_rag.query(
                                             self.external_rag_query,
                                             reranker_top_k=5,
                                             vdb_top_k=10,
