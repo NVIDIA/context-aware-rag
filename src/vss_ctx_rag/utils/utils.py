@@ -233,7 +233,6 @@ def format_docs(docs):
 def extract_external_rag_query(text: str) -> tuple[str, str]:
     """Extract external RAG query from text marked with <e> tags.
     Returns (text_without_tags, external_rag_query)"""
-    import re
 
     pattern = r"<e>(.*?)<e>"
     # Remove the tagged content and get clean text
