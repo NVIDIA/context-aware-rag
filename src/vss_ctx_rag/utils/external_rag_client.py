@@ -21,7 +21,7 @@ from typing import Any, List
 
 from nvidia_rag.rag_server.main import NvidiaRAG
 
-from vss_ctx_rag.utils.ctx_rag_logger import logger, TimeMeasure
+from vss_ctx_rag.utils.ctx_rag_logger import logger, Metrics
 
 
 class ExternalRAGClient:
@@ -58,7 +58,16 @@ class ExternalRAGClient:
             logger.error("External RAG collections are required but not provided.")
             return ""
 
-        with TimeMeasure("external_rag/get_context", "blue"):
+        with Metrics(
+            "external_rag/get_context", "blue", span_kind=Metrics.SPAN_KIND["CHAIN"]
+        ) as tm:
+            tm.input(
+                {
+                    "query": query,
+                    "reranker_top_k": reranker_top_k,
+                    "vdb_top_k": vdb_top_k,
+                }
+            )
             try:
                 if (
                     self.vector_db.embedding.base_url
@@ -100,8 +109,10 @@ class ExternalRAGClient:
 
                 context = self._parse_search_results(search_results)
                 logger.info(f"External RAG context: {context[:100]}...")
+                tm.output({"context": context})
                 return context
             except Exception as e:
                 logger.error(f"Error fetching from external RAG service: {e}")
                 logger.error(traceback.format_exc())
+                tm.error(e)
                 return ""
