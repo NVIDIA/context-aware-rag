@@ -107,15 +107,21 @@ class BatchSummarization(Function):
 
         # Store external RAG query for later use, but use clean prompt for batch processing
         self.external_rag_query = None
-        self.external_rag_enabled = self.get_param(
-            "external_rag_enabled", default=False
-        )
+
+        external_rag_params = self.get_param("external_rag")
+        if external_rag_params:
+            self.external_rag_enabled = external_rag_params.get("enabled", False)
+            collection_str = external_rag_params.get("collection", "")
+            self.enrichment_prompt = external_rag_params.get(
+                "enrichment_prompt", DEFAULT_BATCH_ENRICHMENT_PROMPT
+            )
+        else:
+            self.external_rag_enabled = False
 
         if self.external_rag_enabled:
             self.vector_db = self.get_tool("vector_db")
             self.reranker_tool = self.get_tool("reranker")
             self.nvidia_rag = NvidiaRAG()
-            collection_str = self.get_param("external_rag_collection", default="")
             self.external_rag_collection = [
                 item.strip() for item in collection_str.split(",") if item.strip()
             ]

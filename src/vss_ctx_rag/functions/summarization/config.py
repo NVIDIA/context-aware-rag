@@ -24,27 +24,28 @@ from vss_ctx_rag.utils.globals import (
     DEFAULT_SUMM_TIMEOUT_SEC,
     DEFAULT_SUMM_RECURSION_LIMIT,
 )
+from vss_ctx_rag.functions.rag.config import ExternalRAGParams
 
 
 class SummarizationConfig(FunctionModel):
+    """Base config for the summarization."""
+
     class Prompts(BaseModel):
+        """Prompts for summarization."""
+
         caption: str
         caption_summarization: str
         summary_aggregation: str
 
     class SummarizationParams(BaseModel):
+        """Summarization parameters."""
+
         batch_size: int = Field(default=6, ge=1)
         batch_max_concurrency: int = Field(default=20, ge=1)
         top_k: Optional[int] = Field(default=5, ge=1)
         prompts: "SummarizationConfig.Prompts"
-        enrichment_prompt: Optional[str] = Field(default="")
-        external_rag_collection: Optional[str] = Field(default="")
-        external_rag_enabled: Optional[bool] = Field(default=False)
+        external_rag: Optional[ExternalRAGParams] = Field(default=None)
         is_live: Optional[bool] = False
-        summary_duration: Optional[int] = None
-        chunk_size: Optional[int] = None
         uuid: Optional[str] = Field(default="default")
-        timeout_sec: Optional[int] = Field(default=DEFAULT_SUMM_TIMEOUT_SEC)
-        summ_rec_lim: Optional[int] = Field(default=DEFAULT_SUMM_RECURSION_LIMIT)
 
     params: SummarizationParams
