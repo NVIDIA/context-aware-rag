@@ -32,7 +32,7 @@ from vss_ctx_rag.base.function import Function
 from vss_ctx_rag.tools.health.rag_health import SummaryMetrics
 from vss_ctx_rag.tools.storage.storage_tool import StorageTool
 from vss_ctx_rag.utils.ctx_rag_batcher import Batcher
-from vss_ctx_rag.utils.ctx_rag_logger import Metrics, logger, TimeMeasure
+from vss_ctx_rag.utils.ctx_rag_logger import Metrics, logger
 from vss_ctx_rag.utils.globals import (
     DEFAULT_SUMM_RECURSION_LIMIT,
     DEFAULT_SUMM_TIMEOUT_SEC,
