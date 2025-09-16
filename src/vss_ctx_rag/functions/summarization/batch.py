@@ -95,6 +95,7 @@ class BatchSummarization(Function):
     uuid: str
     external_rag_query: Optional[str] = None
     enrichment_prompt: str
+    enriched_pipeline: RunnableSequence
 
     def setup(self):
         # fixed params
@@ -127,6 +128,15 @@ class BatchSummarization(Function):
                 logger.info(
                     "No external RAG query found in caption summarization prompt"
                 )
+
+            enrichment_prompt_template = ChatPromptTemplate.from_template(
+                self.enrichment_prompt
+            )
+            self.enriched_pipeline = (
+                enrichment_prompt_template
+                | self.get_tool(LLM_TOOL_NAME)
+                | self.output_parser
+            )
         else:
             logger.info("EXTERNAL_RAG_ENABLED is not set to 'true'")
 
@@ -416,17 +426,7 @@ class BatchSummarization(Function):
                                         )
                                     )
                                     if external_context:
-                                        enrichment_prompt = (
-                                            ChatPromptTemplate.from_template(
-                                                self.enrichment_prompt
-                                            )
-                                        )
-                                        enriched_pipeline = (
-                                            enrichment_prompt
-                                            | self.get_tool(LLM_TOOL_NAME)
-                                            | self.output_parser
-                                        )
-                                        result = await enriched_pipeline.ainvoke(
+                                        result = await self.enriched_pipeline.ainvoke(
                                             {
                                                 "video_summary": result,
                                                 "external_context": external_context,
