@@ -65,7 +65,6 @@ tools:
     params:
       model: !ENV ${EXTERNAL_EMBEDDING_MODEL}
       base_url: https://integrate.api.nvidia.com/v1
-      api_key: !ENV ${EXTERNAL_NVIDIA_API_KEY}
 
   external_vector_db:
     type: milvus
