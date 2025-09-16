@@ -47,7 +47,7 @@ tools:
   nvidia_embedding:
     type: embedding
     params:
-      model: nvidia/llama-3.2-nv-embedqa-1b-v2
+      model: !ENV ${EMBEDDING_MODEL:nvidia/llama-3.2-nv-embedqa-1b-v2}
       base_url: https://integrate.api.nvidia.com/v1
       api_key: !ENV ${NVIDIA_API_KEY}
 
@@ -58,6 +58,32 @@ tools:
       base_url: "https://ai.api.nvidia.com/v1/retrieval/nvidia/llama-3_2-nv-rerankqa-1b-v2/reranking"
       api_key: !ENV ${NVIDIA_API_KEY}
 
+<<<<<<< HEAD
+=======
+  external_embedding:
+    type: embedding
+    params:
+      model: !ENV ${EXTERNAL_EMBEDDING_MODEL}
+      base_url: https://integrate.api.nvidia.com/v1
+      api_key: !ENV ${EXTERNAL_NVIDIA_API_KEY}
+
+  external_vector_db:
+    type: milvus
+    params:
+      host: !ENV ${EXTERNAL_MILVUS_DB_HOST}
+      port: !ENV ${EXTERNAL_MILVUS_DB_PORT}
+    tools:
+      embedding: external_embedding
+
+  external_rag:
+    type: external_rag
+    params:
+      collection: !ENV ${EXTERNAL_RAG_COLLECTION: ""}
+    tools:
+      vector_db: external_vector_db
+      reranker: nvidia_reranker
+
+>>>>>>> 9b057ed ( make external rag fully configurable and independent)
 functions:
   summarization:
     type: batch_summarization

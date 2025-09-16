@@ -17,7 +17,7 @@
 
 import asyncio
 import traceback
-from typing import Any, ClassVar, Dict, List
+from typing import Any, ClassVar, Dict, List, Optional
 
 from nvidia_rag.rag_server.main import NvidiaRAG
 from pydantic import Field
@@ -54,7 +54,7 @@ class ExternalRAGTool(Tool):
     def update_tool(self, config, tools=None):
         """Update the tool with new configuration."""
         self.config = config
-        self.vector_db = tools.get("vector_db")
+        self.vector_db = tools.get("vector_db")  # This is now the external_vector_db
         self.reranker_tool = tools.get("reranker")
         self.nvidia_rag = NvidiaRAG()
         self.collection = self.config.collection
