@@ -18,7 +18,14 @@ limitations under the License.
 # Building Documentation
 
 ### Prerequisites
-If you don't already have a uv environment setup, refer to the [Quick Start](./source/intro/quick_start.md#prerequisites) guide.
+
+### Set up virtual environment
+1. Install [Astral UV](https://docs.astral.sh/uv/getting-started/installation/)
+1. Create virtual environment using UV: `uv venv`.
+1. Activate the virtual environment using: `source .venv/bin/activate`.
+1. Install packages into the virtualenv using: `uv sync`.
+
+If you don't already have a uv environment set up, refer to the [Prerequisites](./source/intro/setup.md) guide.
 
 ## Install Documentation Dependencies
 
@@ -35,5 +42,5 @@ make -C docs
 ## Verify the Documentation
 
 ```bash
-firefox build/html/index.html
+firefox docs/build/html/index.html
 ```

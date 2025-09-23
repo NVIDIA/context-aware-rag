@@ -18,15 +18,39 @@
 import asyncio
 import json
 
-from vss_ctx_rag.base import Function
-from vss_ctx_rag.tools.notification import NotificationTool
-from vss_ctx_rag.utils.ctx_rag_logger import logger, TimeMeasure
-from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
+from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables.base import RunnableSequence
+
+from vss_ctx_rag.base.function import Function
+from vss_ctx_rag.tools.notification.notification_tool import NotificationTool
+from vss_ctx_rag.utils.ctx_rag_logger import Metrics, logger
 from vss_ctx_rag.utils.globals import LLM_TOOL_NAME
+from vss_ctx_rag.models.function_models import (
+    register_function,
+    register_function_config,
+)
+from pydantic import BaseModel, Field
+from typing import Optional, Union, List
+from vss_ctx_rag.tools.llm.llm_handler import LLMConfig
 
 
+class Event(BaseModel):
+    event_id: str
+    event_list: List[str]
+
+
+class NotificationParams(BaseModel):
+    events: Optional[List[Event]] = Field(default_factory=list)
+
+
+@register_function_config("notification")
+class NotificationConfig(BaseModel):
+    params: NotificationParams
+    llm: Optional[Union[str, LLMConfig]] = None
+
+
+@register_function(config=NotificationConfig)
 class Notifier(Function):
     """
     Notifier Function
@@ -61,11 +85,7 @@ class Notifier(Function):
 
     def setup(self):
         self.notification_tool = self.get_tool("notification_tool")
-        self.events = (
-            self.get_param("events", required=False)
-            if self.get_param("events", required=False)
-            else []
-        )
+        self.events = self.get_param("events", default=[])
         self.prompt = ChatPromptTemplate.from_messages(
             [("system", self.prompt_str), ("user", "{input}")]
         )
@@ -80,7 +100,9 @@ class Notifier(Function):
         notifications = []
         tasks = []
 
-        with TimeMeasure("notifier/llm_call"):
+        with Metrics("notifier/llm_call", span_kind=Metrics.SPAN_KIND["LLM"]) as tm:
+            tm.input({"events": self.events})
+
             for event_item in self.events:
                 event = event_item["event_list"]
                 event_id = event_item["event_id"]
@@ -95,8 +117,9 @@ class Notifier(Function):
                 )
 
             results = await asyncio.gather(*tasks, return_exceptions=True)
+            tm.output(results)
 
-        with TimeMeasure("notifier/notify_call"):
+        with Metrics("notifier/notify_call", span_kind=Metrics.SPAN_KIND["TOOL"]):
             for result, event_item in zip(results, self.events):
                 event_id = event_item["event_id"]
 
@@ -133,6 +156,5 @@ class Notifier(Function):
                             },
                         )
                     )
-
             if notifications:
                 await asyncio.gather(*notifications)

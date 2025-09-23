@@ -17,8 +17,7 @@
 from aiq.builder.builder import Builder
 from aiq.builder.framework_enum import LLMFrameworkEnum
 from aiq.cli.register_workflow import register_function
-from aiq.data_models.component_ref import FunctionRef
-from aiq.data_models.component_ref import LLMRef
+from aiq.data_models.component_ref import FunctionRef, LLMRef
 from aiq.data_models.function import FunctionBaseConfig
 
 from vss_ctx_rag.aiq.workflow.tool_call_workflow import build_workflow_fn

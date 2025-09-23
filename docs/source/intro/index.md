@@ -31,10 +31,14 @@ This section contains essential information to get started with the Context-Awar
    - Configure system parameters and settings
    - Understand the initialization process
 
+3. [Advanced Usage](./advanced-setup.md)
+   - Learn how to set up different databases and retrieval types
+
 ```{toctree}
 :hidden:
 :maxdepth: 2
 
 Build <./build.md>
 Setup and Usage <./setup.md>
+Advanced Usage <./advanced-setup.md>
 ```

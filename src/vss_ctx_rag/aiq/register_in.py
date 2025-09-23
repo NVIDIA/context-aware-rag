@@ -13,19 +13,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from aiq.builder.builder import Builder
-from aiq.builder.function_info import FunctionInfo
-from aiq.cli.register_workflow import register_function
-from aiq.builder.framework_enum import LLMFrameworkEnum
-from vss_ctx_rag.context_manager import ContextManager
 import os
 import time
+
+from aiq.builder.builder import Builder
+from aiq.builder.framework_enum import LLMFrameworkEnum
+from aiq.builder.function_info import FunctionInfo
+from aiq.cli.register_workflow import register_function
+
 from vss_ctx_rag.aiq.utils import (
-    create_vss_ctx_rag_config,
-    RequestInfo,
     aiq_to_vss_config,
-    update_request_info,
+    create_vss_ctx_rag_config,
 )
+from vss_ctx_rag.context_manager import ContextManager
 from vss_ctx_rag.utils.ctx_rag_logger import logger
 
 IngestionToolConfig = create_vss_ctx_rag_config("vss_ctx_rag_ingestion")
@@ -42,9 +42,7 @@ async def vss_ctx_rag_ingestion(config, builder: Builder):
     vss_ctx_rag_config = aiq_to_vss_config(config, llm.__dict__, embedder.__dict__)
     vss_ctx_rag_config["api_key"] = os.environ["NVIDIA_API_KEY"]
     logger.debug(f"vss_ctx_rag_config: {vss_ctx_rag_config}")
-    req_info = RequestInfo()
-    update_request_info(config, req_info)
-    ctx_mgr = ContextManager(config=vss_ctx_rag_config, req_info=req_info)
+    ctx_mgr = ContextManager(config=vss_ctx_rag_config)
     time.sleep(5)
 
     async def _call_wrapper(text: str) -> str:

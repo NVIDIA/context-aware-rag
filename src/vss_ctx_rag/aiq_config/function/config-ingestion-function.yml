@@ -48,7 +48,7 @@ functions:
 
     rerank_model_name: "nvidia/llama-3.2-nv-rerankqa-1b-v2"
     rerank_model_url: "https://ai.api.nvidia.com/v1/retrieval/nvidia/llama-3_2-nv-rerankqa-1b-v2/reranking"
-    rag_type: "vector-rag" # or "graph-rag"
+    rag_type: "vector-rag" # or "graph-rag" or "foundation-rag"
     chat_batch_size: 1
     summ_batch_size: 5
     summ_batch_max_concurrency: 20

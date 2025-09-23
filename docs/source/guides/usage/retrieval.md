@@ -21,18 +21,62 @@ This guide explains how to query documents in the Context-Aware RAG system.
 
 ## Making Queries
 
-Queries can be made to the system using the `/call` endpoint of the Retrieval Service.
+Queries can be made to the system using the `/chat/completions` endpoint of the Retrieval Service.
 
 ### Request Format
 
 ```json
 {
-  "state": {
-    "chat": {
-      "question": "Your question here",
-      "is_live": false,
+  "model": "meta/llama-3.1-70b-instruct",
+  "base_url": "https://integrate.api.nvidia.com/v1",
+  "messages": [{"role": "user", "content": "Your question here"}],
+  "uuid": "unique-request-id"
+}
+```
+
+### Example Query
+
+```python
+import requests
+import json
+
+url = "http://localhost:8000/chat/completions"
+headers = {"Content-Type": "application/json"}
+chat_data = {
+    "model": "meta/llama-3.1-70b-instruct",
+    "base_url": "https://integrate.api.nvidia.com/v1",
+    "messages": [{"role": "user", "content": "Who mentioned the fire?"}],
+    "uuid": "your_session_uuid"
+}
+
+response = requests.post(url, headers=headers, data=json.dumps(chat_data))
+print(response.json()["choices"][0]["message"]["content"])
+```
+
+### Query Parameters
+
+- `model`: The model to use for the completion (e.g., "meta/llama-3.1-70b-instruct")
+- `base_url`: The base URL for the API (e.g., "https://integrate.api.nvidia.com/v1")
+- `messages`: Array of message objects with `role` and `content` fields
+- `uuid`: Unique identifier for the request
+
+
+## Summary Query
+
+Summary query can be made to the system using the `/summary` endpoint of the Retrieval Service.
+
+start_index: The start index of the batch summary (e.g., 0)
+end_index: The end index of the batch summary (e.g., -1)
+
+### Request Format
+
+```json
+{
+    "uuid": "your_session_uuid",
+    "summarization": {
+        "start_index": 0,
+        "end_index": -1
     }
-  }
 }
 ```
 
@@ -41,25 +85,19 @@ Queries can be made to the system using the `/call` endpoint of the Retrieval Se
 ```python
 import requests
 
-url = "http://localhost:8000/call"
+url = "http://localhost:8000/summary"
 headers = {"Content-Type": "application/json"}
 data = {
-    "state": {
-        "chat": {
-            "question": "What topics are covered in the document?",
-            "is_live": False,
-        }
+    "uuid": "your_session_uuid",
+    "summarization": {
+        "start_index": 0,
+        "end_index": -1
     }
 }
 
 response = requests.post(url, headers=headers, json=data)
-print(response.text)
+print(response.json()["result"])
 ```
-
-### Query Parameters
-
-- `question`: The actual question you want to ask about the documents
-- `is_live`: Set to `true` for real-time queries, `false` for batch processing
 
 ## Best Practices
 
@@ -68,9 +106,10 @@ print(response.text)
    - Use natural language
    - Avoid overly complex or multi-part questions
 
-2. **Query Timing**
-   - For real-time applications, set `is_live: true`
-   - For batch processing, set `is_live: false`
+2. **Message Structure**
+   - Use clear role assignments ("user", "assistant", "system")
+   - Structure your content clearly within the message
+   - Provide meaningful UUIDs for request tracking
 
 3. **Error Handling**
    - Always check response status codes

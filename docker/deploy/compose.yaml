@@ -24,35 +24,72 @@ services:
     ports:
       - ${VSS_CTX_PORT_RET:-8000}:8000
     environment:
-      - MILVUS_HOST=milvus-standalone
-      - MILVUS_PORT=19530
-      - GRAPH_DB_URI=bolt://neo4j:7687
-      - GRAPH_DB_USERNAME=neo4j
-      - GRAPH_DB_PASSWORD=password
+      - MILVUS_DB_HOST=milvus-standalone
+      - MILVUS_DB_PORT=${MILVUS_DB_PORT:-19530}
+      - GRAPH_DB_HOST=neo4j-db
+      - GRAPH_DB_PORT=${GRAPH_DB_PORT:-7687}
+      - GRAPH_DB_USERNAME=${GRAPH_DB_USERNAME:-}
+      - GRAPH_DB_PASSWORD=${GRAPH_DB_PASSWORD:-}
+      - ARANGO_DB_HOST=arango-db
+      - ARANGO_DB_USERNAME=${ARANGO_DB_USERNAME:-}
+      - ARANGO_DB_PASSWORD=${ARANGO_DB_PASSWORD:-}
+      - ARANGO_DB_PORT=${ARANGO_DB_PORT:-8529}
+      - MINIO_HOST=minio
+      - MINIO_PORT=${MINIO_PORT:-9000}
+      - MINIO_USERNAME=${MINIO_USERNAME:-}
+      - MINIO_PASSWORD=${MINIO_PASSWORD:-}
       - NVIDIA_API_KEY=${NVIDIA_API_KEY:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - VIA_CTX_RAG_ENABLE_RET=true
+      - VSS_CTX_RAG_ENABLE_RET=true
       - VIA_CTX_RAG_ENABLE_OTEL=true
       - VIA_CTX_RAG_EXPORTER=otlp
       - VIA_CTX_RAG_OTEL_ENDPOINT=http://otel_collector:4318
-
+      - GNN_BASE_URL=${GNN_BASE_URL:-}
+      - ES_HOST=elasticsearch
+      - ES_PORT=${ES_PORT:-9200}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
   vss-ctx-rag-data-ingestion:
     image: vss_ctx_rag-${USER}
     container_name: vss-ctx-rag-data-ingestion
     ports:
       - ${VSS_CTX_PORT_IN:-8001}:8000
     environment:
-      - MILVUS_HOST=milvus-standalone
-      - MILVUS_PORT=19530
-      - GRAPH_DB_URI=bolt://neo4j:7687
-      - GRAPH_DB_USERNAME=neo4j
-      - GRAPH_DB_PASSWORD=password
+      - MILVUS_DB_HOST=milvus-standalone
+      - MILVUS_DB_PORT=${MILVUS_DB_PORT:-19530}
+      - GRAPH_DB_HOST=neo4j-db
+      - GRAPH_DB_PORT=${GRAPH_DB_PORT:-7687}
+      - GRAPH_DB_USERNAME=${GRAPH_DB_USERNAME:-}
+      - GRAPH_DB_PASSWORD=${GRAPH_DB_PASSWORD:-}
+      - ARANGO_DB_HOST=arango-db
+      - ARANGO_DB_USERNAME=${ARANGO_DB_USERNAME:-}
+      - ARANGO_DB_PASSWORD=${ARANGO_DB_PASSWORD:-}
+      - ARANGO_DB_PORT=${ARANGO_DB_PORT:-8529}
+      - MINIO_HOST=minio
+      - MINIO_PORT=${MINIO_PORT:-9000}
+      - MINIO_USERNAME=${MINIO_USERNAME:-}
+      - MINIO_PASSWORD=${MINIO_PASSWORD:-}
       - NVIDIA_API_KEY=${NVIDIA_API_KEY:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - VSS_CTX_RAG_ENABLE_RET=false
       - VIA_CTX_RAG_ENABLE_OTEL=true
       - VIA_CTX_RAG_EXPORTER=otlp
       - VIA_CTX_RAG_OTEL_ENDPOINT=http://otel_collector:4318
-      - VIA_CTX_RAG_ENABLE_DEV=${VIA_CTX_RAG_ENABLE_DEV:-false}
+      - GNN_BASE_URL=${GNN_BASE_URL:-}
+      - ES_HOST=elasticsearch
+      - ES_PORT=${ES_PORT:-9200}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
 
 
 networks:

@@ -15,15 +15,13 @@
 
 
 from opentelemetry import trace
-
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import (
-    BatchSpanProcessor,
-    ConsoleSpanExporter,
-)
+from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
+from openinference.instrumentation.openai import OpenAIInstrumentor
+from openinference.instrumentation.langchain import LangChainInstrumentor
+
 from vss_ctx_rag.utils.ctx_rag_logger import logger
 
 
@@ -49,6 +47,10 @@ def init_otel(service_name: str, exporter_type: str, endpoint=None):
             f"Invalid exporter type: {exporter_type}. Valid types are: console, otlp. Check if endpoint is provided for otlp exporter."
         )
     traceProvider.add_span_processor(processor)
+    OpenAIInstrumentor().instrument(skip_dep_check=True, tracer_provider=traceProvider)
+    LangChainInstrumentor().instrument(
+        skip_dep_check=True, tracer_provider=traceProvider
+    )
     trace.set_tracer_provider(traceProvider)
 
     logger.info(

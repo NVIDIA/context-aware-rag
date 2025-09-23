@@ -29,8 +29,9 @@
 
 import os
 import shutil
-import subprocess
 import typing
+
+import tomllib
 
 if typing.TYPE_CHECKING:
     from autoapi._objects import PythonObject
@@ -60,11 +61,11 @@ project = "Context Aware RAG"
 copyright = "2025, NVIDIA"
 author = "NVIDIA Corporation"
 
-# Retrieve the version number from git via setuptools_scm
-called_proc = subprocess.run(
-    "python -m setuptools_scm", shell=True, capture_output=True, check=True
-)
-release = called_proc.stdout.strip().decode("utf-8")
+# Retrieve the version number from pyproject.toml
+PYPROJECT_PATH = os.path.join(ROOT_DIR, "pyproject.toml")
+with open(PYPROJECT_PATH, "rb") as f:
+    pyproject_data = tomllib.load(f)
+release = pyproject_data["project"]["version"]
 version = ".".join(release.split(".")[:3])
 
 # -- General configuration ---------------------------------------------------

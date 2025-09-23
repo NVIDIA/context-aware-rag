@@ -13,4 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .llm_handler import *
+"""Import all LLM tool modules to trigger registration decorators."""
+
+from . import llm_handler
+
+__all__ = ["llm_handler"]

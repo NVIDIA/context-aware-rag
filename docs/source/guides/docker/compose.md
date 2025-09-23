@@ -24,12 +24,12 @@ limitations under the License.
 -   [Docker](https://docs.docker.com/)
 -   [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
 
-#### Setting up env
+#### Setting up environment
 
 Create a .env file in the root directory and set the following
 variables:
 
-``` bash
+```bash
 NVIDIA_API_KEY=<IF USING NVIDIA> #NVIDIA API key
 NVIDIA_VISIBLE_DEVICES=<GPU ID> #GPU ID, e.g. 0
 
@@ -37,41 +37,69 @@ OPENAI_API_KEY=<IF USING OPENAI> #OpenAI API key
 
 VSS_CTX_PORT_RET=<DATA RETRIEVAL PORT> #data retrieval port, e.g. 8000
 VSS_CTX_PORT_IN=<DATA INGESTION PORT> #data ingestion port, e.g. 8001
+
+# Milvus Configuration
+MILVUS_DB_HTTP_PORT=<MILVUS_HTTP_PORT> #milvus HTTP port, e.g. 9091
+MILVUS_DB_PORT=<MILVUS_GRPC_PORT> #milvus GRPC port, e.g. 19530
+
+# Neo4j Configuration
+GRAPH_DB_HTTP_PORT=<NEO4J_HTTP_PORT> #neo4j HTTP port, e.g. 7474
+GRAPH_DB_PORT=<NEO4J_PORT> #neo4j bolt port, e.g. 7687
+GRAPH_DB_USERNAME=<USERNAME> #neo4j username, e.g. neo4j
+GRAPH_DB_PASSWORD=<PASSWORD> #neo4j password, e.g. password
+
+# MinIO Configuration
+MINIO_PORT=<MINIO_PORT> #minio API port, e.g. 9000
+MINIO_WEBUI_PORT=<MINIO_WEBUI_PORT> #minio web UI port, e.g. 9001
+MINIO_ROOT_USER=<MINIO_USER> #minio root user, e.g. minio
+MINIO_ROOT_PASSWORD=<MINIO_PASSWORD> #minio root password, e.g. minio123
+
+# ArangoDB Configuration
+ARANGO_DB_PORT=<ARANGO_PORT> #arangodb port, e.g. 8529
+ARANGO_DB_USERNAME=<ARANGO_USER> #arangodb username
+ARANGO_DB_PASSWORD=<ARANGO_PASSWORD> #arangodb password
 ```
 
-### Using docker compose
+### Using Docker Compose
 
 #### First build the containers
 
-``` bash
+```bash
 make -C docker build
 ```
 
 #### Start the services
 
-``` bash
+```bash
 make -C docker start_compose
 ```
 
 This will start the following services:
 
--   ctx-rag-data-ingestion
--   ctx-rag-data-retrieval
--   neo4j
+-   vss-ctx-rag-data-ingestion
+-   vss-ctx-rag-retriever
+-   neo4j-db
     -   UI available at <http://>\<HOST\>:7474
--   milvus
+-   milvus-standalone
+-   minio
+    -   UI available at <http://>\<HOST\>:9001
+-   arango-db
+    -   UI available at <http://>\<HOST\>:8529
 -   otel-collector
--   jaeger
+-   phoenix
     -   UI available at <http://>\<HOST\>:16686
 -   prometheus
     -   UI available at <http://>\<HOST\>:9090
+-   grafana
+    -   UI available at <http://>\<HOST\>:3000
 -   cassandra
+-   cassandra-schema
 
 To change the storage volumes, export DOCKER_VOLUME_DIRECTORY to the
 desired directory.
 
 #### Stop the services
 
-``` bash
+```bash
 make -C docker stop_compose
 ```

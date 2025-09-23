@@ -13,6 +13,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .notification_tool import *
-from .echo_notification_tool import *
-from .alert_sse_tool import *
+"""Import all notification tool modules to trigger registration decorators."""
+
+from . import alert_sse_tool
+from . import echo_notification_tool
+from . import notification_tool
+
+__all__ = ["alert_sse_tool", "echo_notification_tool", "notification_tool"]

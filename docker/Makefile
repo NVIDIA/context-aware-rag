@@ -21,20 +21,20 @@ IMAGE_NAME=vss_ctx_rag-$(USER)
 
 
 build:
-	docker build -t $(IMAGE_NAME) -f Dockerfile ..
+	docker build  -t $(IMAGE_NAME) -f Dockerfile ..
 
 start_ret:
 	@if [ -f ../.env ]; then \
-		docker run --env-file ../.env -it -p $(VSS_CTX_PORT_RET):8000 --env VIA_CTX_RAG_ENABLE_RET=true  $(IMAGE_NAME) $(if $(INTERACTIVE),/bin/bash); \
+		docker run --env-file ../.env -it -p $(VSS_CTX_PORT_RET):8000 --env VSS_CTX_RAG_ENABLE_RET=true  --gpus all $(IMAGE_NAME) $(if $(INTERACTIVE),/bin/bash); \
 	else \
-		docker run -it -p $(VSS_CTX_PORT_RET):8000 --env VIA_CTX_RAG_ENABLE_RET=true $(IMAGE_NAME) $(if $(INTERACTIVE),/bin/bash); \
+		docker run -it -p $(VSS_CTX_PORT_RET):8000 --env VSS_CTX_RAG_ENABLE_RET=true --gpus all $(IMAGE_NAME) $(if $(INTERACTIVE),/bin/bash); \
 	fi
 
 start_in:
 	@if [ -f ../.env ]; then \
-		docker run --env-file ../.env -it -p $(VSS_CTX_PORT_IN):8000 --env VIA_CTX_RAG_ENABLE_RET=false  $(IMAGE_NAME) $(if $(INTERACTIVE),/bin/bash); \
+		docker run --env-file ../.env -it -p $(VSS_CTX_PORT_IN):8000 --env VSS_CTX_RAG_ENABLE_RET=false --gpus all  $(IMAGE_NAME) $(if $(INTERACTIVE),/bin/bash); \
 	else \
-		docker run -it -p $(VSS_CTX_PORT_IN):8000 --env VIA_CTX_RAG_ENABLE_RET=false $(IMAGE_NAME) $(if $(INTERACTIVE),/bin/bash); \
+		docker run -it -p $(VSS_CTX_PORT_IN):8000 --env VSS_CTX_RAG_ENABLE_RET=false --gpus all $(IMAGE_NAME) $(if $(INTERACTIVE),/bin/bash); \
 	fi
 
 start_compose:

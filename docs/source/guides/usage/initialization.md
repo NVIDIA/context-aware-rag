@@ -19,13 +19,19 @@ limitations under the License.
 
 This guide explains how to initialize the Context-Aware RAG services.
 
+## Service Startup
+
+The Context-Aware RAG services follow the startup guide in the [Docker Compose Guide](../../guides/docker/compose.md).
+
 ## Service Initialization
 
 Both services must be initialized before use with the same UUID to ensure proper communication.
 
 ### Config File
 
-Both services need a config file to initialize. Refer to the [Configuration](../../intro/quick_start.md#setting-up-config-file) guide for more information on the config file.
+Both services need a config file to initialize. Refer to the [Configuration](../../intro/setup.md) guide for more information on the config file.
+
+Note: Currently vector ingestion and retrieval are not supported for CA-RAG service.
 
 ### Initialize Data Ingestion Service
 

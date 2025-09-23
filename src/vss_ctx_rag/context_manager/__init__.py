@@ -13,4 +13,27 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .context_manager import *
+from .context_manager_handler import ContextManagerHandler
+from .context_manager import ContextManager, ContextManagerProcess
+
+from vss_ctx_rag import functions
+from vss_ctx_rag import tools
+
+try:
+    from vss_ctx_rag import plugins
+
+    _plugins_available = True
+except ImportError:
+    plugins = None
+    _plugins_available = False
+
+__all__ = [
+    "ContextManagerHandler",
+    "ContextManager",
+    "ContextManagerProcess",
+    "functions",
+    "tools",
+]
+
+if _plugins_available:
+    __all__.append("plugins")

@@ -15,11 +15,11 @@
 
 import logging
 
-from langchain_core.tools.structured import StructuredTool
 from aiq.builder.builder import Builder
 from aiq.builder.framework_enum import LLMFrameworkEnum
 from aiq.builder.function_info import FunctionInfo
 from aiq.data_models.api_server import AIQChatResponse
+from langchain_core.tools.structured import StructuredTool
 
 logger = logging.getLogger(__name__)
 
