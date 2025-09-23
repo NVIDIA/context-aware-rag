@@ -53,8 +53,8 @@ Create a .env file in the root directory and set the following
 variables:
 
 ``` bash
-MILVUS_HOST=<HOST> #milvus host, e.g. localhost
-MILVUS_PORT=<MILVUS_PORT> #milvus port, e.g. 19530
+MILVUS_DB_HOST=<HOST> #milvus host, e.g. localhost
+MILVUS_DB_PORT=<MILVUS_PORT> #milvus port, e.g. 19530
 
 GRAPH_DB_URI=bolt://<HOST>:<NEO4J_PORT> #neo4j uri, e.g. bolt://localhost:7687
 GRAPH_DB_USERNAME=<GRAPH_DB_USERNAME> #neo4j username, e.g. neo4j

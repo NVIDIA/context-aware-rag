@@ -14,18 +14,31 @@
 # limitations under the License.
 
 import aiohttp
-from vss_ctx_rag.tools.notification import NotificationTool
+
+from vss_ctx_rag.tools.notification.notification_tool import NotificationTool
 from vss_ctx_rag.utils.ctx_rag_logger import logger
+from vss_ctx_rag.models.tool_models import register_tool_config, register_tool
+from vss_ctx_rag.models.tool_models import ToolBaseModel
 
 
+@register_tool_config("alert_sse_notifier")
+class AlertSSEConfig(ToolBaseModel):
+    endpoint: str
+
+
+@register_tool(config=AlertSSEConfig)
 class AlertSSETool(NotificationTool):
     """Tool for sending an alert as a post request to the endpoint.
     Implements NotificationTool class
     """
 
-    def __init__(self, endpoint: str, name="alert_sse_notifier") -> None:
-        super().__init__(name)
-        self.alert_endpoint = endpoint
+    def __init__(self, name="alert_sse_notifier", tools=None, config=None) -> None:
+        super().__init__(name, config, tools)
+        self.update_tool(self.config, tools)
+
+    def update_tool(self, config, tools=None):
+        self.config = config
+        self.alert_endpoint = config.params.endpoint
 
     async def notify(self, title: str, message: str, metadata: dict):
         try:

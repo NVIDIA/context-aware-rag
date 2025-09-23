@@ -32,5 +32,5 @@ uv pip install -e .
 3. (B) Build and install from wheel file
 ```bash
 uv build
-uv pip install dist/vss-ctx-rag-0.5.0-py3-none-any.whl
+uv pip install dist/vss-ctx-rag-1.0.0-py3-none-any.whl
 ```

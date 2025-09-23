@@ -15,12 +15,14 @@
 
 """function.py: File contains Function class"""
 
-from typing import Optional
-from vss_ctx_rag.base import Tool
-from vss_ctx_rag.utils.ctx_rag_logger import logger
+from abc import ABC, abstractmethod
+from typing import Optional, Any
+
+from vss_ctx_rag.base.tool import Tool
+from vss_ctx_rag.models import FunctionConfig
 
 
-class Function:
+class Function(ABC):
     """Base class for all functions in the RAG system.
 
     This class provides the core interface and functionality for all RAG operations.
@@ -33,7 +35,7 @@ class Function:
         self.is_setup: bool = False
         self._tools: dict[str, Tool] = {}
         self._functions: dict[str, Function] = {}
-        self._params = {}
+        self._config: FunctionConfig = None
 
     def add_tool(self, name: str, tool: Tool):
         """Adds a tool to the function
@@ -50,6 +52,14 @@ class Function:
         if name in self._tools:
             raise RuntimeError(f"Tool {name} already added in {self.name} function")
         self._tools[name] = tool
+        return self
+
+    def remove_tool(self, name: str):
+        """Removes a tool from the function"""
+        if name in self._tools:
+            del self._tools[name]
+        else:
+            raise RuntimeError(f"Tool {name} not found in {self.name} function")
         return self
 
     def add_function(self, name: str, function: "Function"):
@@ -97,84 +107,51 @@ class Function:
         result = await self.aprocess_doc(doc, doc_i, doc_meta)
         return result
 
-    # Update top_p, temperature, max_tokens for functions
-    def update_llm(self, **params):
-        """Updates LLM parameters (top_p, temperature, max_tokens) for the function.
+    def config(self, config_obj: FunctionConfig = None, **kwargs):
+        """Configure the function with a pydantic config object.
 
         Args:
-            **params: Dictionary containing LLM parameters to update
+            config_obj: Pydantic config object containing function configuration
+            **kwargs: Legacy support for backward compatibility (will be ignored)
         """
-        top_p = self.get_param("llm", "top_p")
-        temperature = self.get_param("llm", "temperature")
-        max_tokens = self.get_param("llm", "max_tokens")
-        # If the params have changed at runtime, update the llm tool
-        if params.get("llm", None) and top_p != params["llm"]["top_p"]:
-            top_p = params["llm"]["top_p"]
-        else:
-            top_p = None
-        if params.get("llm", None) and temperature != params["llm"]["temperature"]:
-            temperature = params["llm"]["temperature"]
-        else:
-            temperature = None
-        if params.get("llm", None) and max_tokens != params["llm"]["max_tokens"]:
-            max_tokens = params["llm"]["max_tokens"]
-        else:
-            max_tokens = None
-        if top_p is not None or temperature is not None or max_tokens is not None:
-            if self.get_tool("llm") is not None:
-                logger.debug(
-                    f"Updating llm for function {self.name} with : top_p {top_p}, "
-                    f"temperature {temperature}, max_tokens {max_tokens}"
-                )
-                self.get_tool("llm").update(
-                    top_p=top_p, temperature=temperature, max_tokens=max_tokens
-                )
-            else:
-                logger.debug(f"LLM tool not found for function{self.name}")
-        else:
-            logger.debug(f"LLM not updated for function{self.name}")
-
-    def config(self, **params):
-        self._params.update(params)
+        if config_obj:
+            self._config = config_obj
         return self
 
-    # TODO: Add def update(self) this will be added later.
-    # We have to implement stop() which will ensure that
-    # updating the config values is threadsafe
-    def update(self, **params):
-        self.update_llm(**params)
-        # Update all sub-functions
+    def get_param(self, key: str, default: Any = None):
+        """Get a parameter from the config's params dictionary by traversing through keys.
+
+        Args:
+            key (str): The key to get the parameter for
+            default (Any): Default value to return if parameter not found and not required
+
+        Returns:
+            Any: The parameter value if found, otherwise the default value
+
+        Raises:
+            AttributeError: If config is not properly initialized
+        """
+        if not self._config:
+            return default
+        return self._config.params.get(key, default)
+
+    def update(self, config_obj: FunctionConfig):
+        """Update the function configuration with a new config object.
+
+        Args:
+            config_obj: New pydantic config object to replace the current configuration
+        """
+        # Replace the config with the new one
+        self._config = config_obj
+
+        # Update all sub-functions with the same config
         for f in self._functions.values():
-            f.update(**params)
-        self.config(**params)
+            f.update(config_obj)
+
+        # Re-setup this function with the new config
         self.done()
 
-    # function finds the value of a param from a nested dictionary
-    # param is provided in the form of keys to traverse the dictionary
-    # eg : to Obtain the batch_size for summarization, func.get_param("params", "batch_size")
-    def get_param(self, *keys, required: bool = True, params: dict = None):
-        if len(keys) == 0 and params is None:  # if no key is provided
-            logger.info(f"======= PARAMS {params}")
-            raise ValueError("Empty param provided.")
-        if params is None:  # Top level function call before recursion begins
-            params = self._params  # save an object reference to the param store
-        if isinstance(params, dict):
-            if len(keys) == 0:
-                raise ValueError("Required more param keyss.")
-            if keys[0] not in params:
-                if required:  # key not found but required
-                    raise ValueError(f"Required param {keys[0]} not configured.")
-                else:  # key not found
-                    return None
-            else:  # Call the same function for traversing the inner dictionary obtained by indexing
-                return self.get_param(
-                    *keys[1:], required=required, params=params[keys[0]]
-                )
-        else:  # Reached the value in the dictionary
-            if len(keys) == 0:  # there are no more keys provided to traverse,
-                return params
-            if len(keys) > 0:  # there are more keys provided to traverse
-                raise ValueError(f"Required param {keys} not configured.")
+        return self
 
     def done(self):
         self.setup()
@@ -188,6 +165,7 @@ class Function:
     # Pass **config, **tools, **functions instead of this
     # Or even better add _config, _tools and _functions in self and
     # expose a function like get_tool(), get_function(), get_config()
+    @abstractmethod
     def setup(self) -> dict:
         """Abstract method that must be implemented by subclasses.
         This method is where the business logic of function
@@ -199,8 +177,9 @@ class Function:
         Raises:
             RuntimeError: If not implemented by subclass.
         """
-        raise RuntimeError("`setup` method not Implemented!")
+        pass
 
+    @abstractmethod
     async def acall(self, state: dict) -> dict:
         """This method is where the business logic of function
         should be implemented which can use tools. Each class
@@ -209,8 +188,9 @@ class Function:
         Args:
             state (dict): This is the dict of the state
         """
-        raise RuntimeError("`call` method not Implemented!")
+        pass
 
+    @abstractmethod
     async def aprocess_doc(self, doc: str, doc_i: int, doc_meta: dict):
         """This method is called every time a doc is added to
         the Context Manager. The function has the option to process the

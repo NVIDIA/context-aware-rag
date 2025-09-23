@@ -12,3 +12,10 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
+"""Import all graph RAG function modules to trigger registration decorators."""
+
+from . import ingestion
+from . import retrieval
+
+__all__ = ["ingestion", "retrieval"]

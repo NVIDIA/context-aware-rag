@@ -14,39 +14,12 @@
 # limitations under the License.
 
 from typing import Dict, Optional
-from aiq.data_models.function import FunctionBaseConfig
+
 from aiq.data_models.component_ref import EmbedderRef, LLMRef
+from aiq.data_models.function import FunctionBaseConfig
 
 ##TODO: Remove this class dependency.
 ## Everything should be defined in the aiq config file
-
-
-class RequestInfo:
-    """Configuration container for request-specific parameters.
-
-    This class holds configuration parameters that can be customized per request,
-    including summarization settings, chat settings, and LLM parameters.
-    """
-
-    def __init__(self):
-        self.summarize = True
-        self.enable_chat = True
-        self.is_live = False
-        self.uuid = "1"
-        self.caption_summarization_prompt = "Return input as is"
-        self.summary_aggregation_prompt = "Return input as is"
-        self.chunk_size = 0
-        self.summary_duration = 0
-        self.summarize_top_p = None
-        self.summarize_temperature = None
-        self.summarize_max_tokens = None
-        self.chat_top_p = None
-        self.chat_temperature = None
-        self.chat_max_tokens = None
-        self.notification_top_p = None
-        self.notification_temperature = None
-        self.notification_max_tokens = None
-        self.rag_type = "vector-rag"
 
 
 def aiq_to_vss_config(
@@ -145,16 +118,3 @@ def create_vss_ctx_rag_config(name: str):
         uuid: Optional[str] = "1"
 
     return VssCtxRagToolConfig
-
-
-def update_request_info(config, req_info):
-    """
-    Updates RequestInfo object with values from VssCtxRagToolConfig
-
-    Args:
-        config: VssCtxRagToolConfig instance
-        req_info: RequestInfo instance to be updated
-    """
-    for field in vars(req_info).keys():
-        if hasattr(config, field):
-            setattr(req_info, field, getattr(config, field))

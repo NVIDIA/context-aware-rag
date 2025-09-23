@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Copyright (c) 2024-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,4 +13,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .batch import *
+"""Import all summarization modules to trigger registration decorators."""
+
+# Import configuration for backward compatibility
+from .config import SummarizationConfig
+
+# Import summarization modules
+from . import batch
+from . import offline_batch
+from . import summary_retriever
+
+__all__ = ["batch", "offline_batch", "SummarizationConfig", "summary_retriever"]

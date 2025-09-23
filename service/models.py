@@ -14,25 +14,69 @@
 # limitations under the License.
 
 from pydantic import BaseModel, model_validator
-from typing import Optional
-from vss_ctx_rag.context_manager.context_manager_models import ContextManagerConfig
+from typing import Optional, List
+from copy import deepcopy
+import os
 from vss_ctx_rag.utils.ctx_rag_logger import logger
 
+MAX_DEPTH = 20
 
-class BaseConfigRequest(BaseModel):
+
+def resolve_env_vars(config: dict, depth: int = 0) -> dict:
+    """
+    Recursively resolve environment variables in config dictionary.
+    Environment variables should be in the format ${ENV_VAR_NAME}.
+    """
+    resolved_config = {}
+
+    if depth == MAX_DEPTH:
+        logger.warning("Max depth reached, returning deepcopy of resolved config")
+        return deepcopy(config)
+
+    for key, value in config.items():
+        if isinstance(value, dict):
+            resolved_config[key] = resolve_env_vars(value, depth + 1)
+        elif isinstance(value, list):
+            resolved_list = []
+            for item in value:
+                if isinstance(item, dict):
+                    resolved_list.append(resolve_env_vars(item, depth + 1))
+                elif (
+                    isinstance(item, str)
+                    and item.startswith("${")
+                    and item.endswith("}")
+                ):
+                    env_var_name = item[2:-1]
+                    env_value = os.environ.get(env_var_name)
+                    if env_value is not None:
+                        resolved_list.append(env_value)
+                    else:
+                        logger.warning(
+                            f"Environment variable '{env_var_name}' not found, keeping original value"
+                        )
+                        resolved_list.append(item)
+                else:
+                    resolved_list.append(item)
+            resolved_config[key] = resolved_list
+        elif isinstance(value, str) and value.startswith("${") and value.endswith("}"):
+            env_var_name = value[2:-1]
+            env_value = os.environ.get(env_var_name)
+            if env_value is not None:
+                resolved_config[key] = env_value
+            else:
+                logger.warning(
+                    f"Environment variable '{env_var_name}' not found, keeping original value"
+                )
+                resolved_config[key] = value
+        else:
+            resolved_config[key] = value
+    return deepcopy(resolved_config)
+
+
+class ConfigModel(BaseModel):
     config_path: Optional[str] = None
     context_config: Optional[dict] = None
-
-    @model_validator(mode="before")
-    def validate_context_config(cls, values: dict) -> dict:
-        context_config = values.get("context_config")
-        if context_config is not None:
-            if isinstance(context_config, dict):
-                try:
-                    _ = ContextManagerConfig(**context_config)
-                except Exception as e:
-                    raise ValueError(f"Invalid context_config: {e}")
-        return values
+    uuid: str
 
     @model_validator(mode="before")
     def check_exclusivity(cls, values: dict) -> dict:
@@ -47,49 +91,66 @@ class BaseConfigRequest(BaseModel):
         return values
 
 
-class AddRequest(BaseModel):
+class AddModel(BaseModel):
     document: str
     doc_index: int
     doc_metadata: dict = {}
+    uuid: str
 
 
-class RequestInfo(BaseModel):
-    summarize: bool = True
-    enable_chat: bool = True
-    is_live: bool = False
-    uuid: str = "0"
-    stream_id: str = ""
-    caption_summarization_prompt: str = "Return input as is"
-    summary_aggregation_prompt: str = "Return input as is"
-    chunk_size: int = 0
-    summary_duration: int = 0
-    summarize_top_p: Optional[float] = None
-    summarize_temperature: Optional[float] = None
-    summarize_max_tokens: Optional[int] = None
-    chat_top_p: Optional[float] = None
-    chat_temperature: Optional[float] = None
-    chat_max_tokens: Optional[int] = None
-    notification_top_p: Optional[float] = None
-    notification_temperature: Optional[float] = None
-    notification_max_tokens: Optional[int] = None
-    rag_type: str = "vector-rag"
-
-
-class CallRequest(BaseModel):
+class CallModel(BaseModel):
     state: dict
+    uuid: str
 
 
-class ResetRequest(BaseModel):
+class ResetModel(BaseModel):
     state: dict
+    uuid: str
 
 
-class DCFileRequest(BaseModel):
+class DCFileModel(BaseModel):
     dc_file_path: str
+    uuid: str
 
 
-class InitRequest(BaseConfigRequest):
-    uuid: Optional[str] = "0"
+class SummaryModel(BaseModel):
+    class SummaryState(BaseModel):
+        start_index: int = 0
+        end_index: int = -1  # -1 means "until end"
+
+        @model_validator(mode="before")
+        def validate_indices(cls, values: dict) -> dict:
+            start_index = values.get("start_index", 0)
+            end_index = values.get("end_index", -1)
+
+            if start_index < 0:
+                raise ValueError("start_index must be non-negative")
+
+            if end_index != -1 and end_index < start_index:
+                raise ValueError(
+                    "end_index must be -1 or greater than or equal to start_index"
+                )
+
+            return values
+
+    summarization: SummaryState
+    uuid: str
 
 
-class UpdateConfigRequest(BaseConfigRequest):
-    request_info: Optional[RequestInfo] = None
+class CompleteIngestionModel(BaseModel):
+    uuid: str
+
+
+class ChatMessage(BaseModel):
+    role: str
+    content: str
+
+
+class ChatModel(BaseModel):
+    model: str
+    base_url: Optional[str] = None
+    messages: List[ChatMessage]
+    temperature: Optional[float] = 1.0
+    top_p: Optional[float] = 1.0
+    max_tokens: Optional[int] = 4096
+    uuid: str

@@ -13,10 +13,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Optional
 from collections import defaultdict
+from typing import Optional
 import threading
-from vss_ctx_rag.utils.ctx_rag_logger import logger, TimeMeasure
+
+from vss_ctx_rag.utils.ctx_rag_logger import Metrics, logger
 
 
 class Batch:
@@ -102,6 +103,12 @@ class Batch:
             return [value for _, value in sorted(self._batch.items())]
         return list(self._batch.values())
 
+    def get_batch_index(self):
+        return self._batch_index
+
+    def get_batch_size(self):
+        return self._batch_size
+
     def __str__(self):
         return str(self.as_list(sort=False))
 
@@ -124,7 +131,7 @@ class Batcher:
         Returns:
             Batch: The batch that the document was added to
         """
-        with TimeMeasure("Add Doc", "green"):
+        with Metrics("Add Doc", "green"):
             logger.info(f"adding {doc_i} to batch")
             with self._lock:
                 batch = self.batches[doc_i // self.batch_size]
@@ -158,6 +165,13 @@ class Batcher:
             for i, batch in self.batches.items():
                 batches.extend(batch.as_list())
             return batches
+
+    def get_all_full_batches(self):
+        batches = []
+        for _, batch in self.batches.items():
+            if batch.is_full():
+                batches.append(batch)
+        return batches
 
     def get_batch_index(self, doc_i):
         return doc_i // self.batch_size

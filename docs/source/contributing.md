@@ -161,7 +161,7 @@ Review the unassigned issues and choose an issue that you are comfortable contri
 
 ## Developing with context-aware-rag
 
-Refer to the [Get Started](./intro/quick_start.md) guide to quickly begin development.
+Refer to the [Get Started](./intro/setup.md) guide to quickly begin development.
 
 
 ## Licensing

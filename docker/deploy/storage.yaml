@@ -14,71 +14,78 @@
 # limitations under the License.
 
 services:
-  etcd:
-    container_name: milvus-etcd
-    image: quay.io/coreos/etcd:v3.5.5
-    environment:
-      - ETCD_AUTO_COMPACTION_MODE=revision
-      - ETCD_AUTO_COMPACTION_RETENTION=1000
-      - ETCD_QUOTA_BACKEND_BYTES=4294967296
-      - ETCD_SNAPSHOT_COUNT=50000
-    volumes:
-      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/etcd:/etcd
-    command: etcd -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
-    healthcheck:
-      test: ["CMD", "etcdctl", "endpoint", "health"]
-      interval: 30s
-      timeout: 20s
-      retries: 3
-
   minio:
-    container_name: milvus-minio
-    image: minio/minio:RELEASE.2023-03-20T20-16-18Z
-    environment:
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
+    image: minio/minio:latest
     ports:
-      - "9001:9001"
-      - "9000:9000"
-    volumes:
-      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/minio:/minio_data
-    command: minio server /minio_data --console-address ":9001"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 30s
-      timeout: 20s
-      retries: 3
-
-  standalone:
-    container_name: milvus-standalone
-    image: milvusdb/milvus:v2.4.4
-    command: ["milvus", "run", "standalone"]
-    security_opt:
-    - seccomp:unconfined
+      - "${MINIO_PORT:-9000}:${MINIO_PORT:-9000}"
+      - "${MINIO_WEBUI_PORT:-9001}:${MINIO_WEBUI_PORT:-9001}"
     environment:
-      ETCD_ENDPOINTS: etcd:2379
-      MINIO_ADDRESS: minio:9000
+      MINIO_ROOT_USER: ${MINIO_USERNAME}
+      MINIO_ROOT_PASSWORD: ${MINIO_PASSWORD}
     volumes:
-      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/milvus:/var/lib/milvus
+      - minio-data:/data
+    command: server /data --address ":${MINIO_PORT:-9000}" --console-address ":${MINIO_WEBUI_PORT:-9001}"
+    restart: unless-stopped
+
+  milvus-standalone:
+    image: milvusdb/milvus:v2.5.4
+    command: |
+      sh -c "
+      cat <<EOF > /milvus/configs/embedEtcd.yaml
+      listen-client-urls: http://0.0.0.0:2379
+      advertise-client-urls: http://0.0.0.0:2379
+      quota-backend-bytes: 4294967296
+      auto-compaction-mode: revision
+      EOF
+      cat <<EOF >  /milvus/configs/user.yaml
+      log:
+        level: error
+      EOF
+      milvus run standalone
+      "
+    environment:
+      - ETCD_USE_EMBED=true
+      - ETCD_DATA_DIR=/var/lib/milvus/etcd
+      - ETCD_CONFIG_PATH=/milvus/configs/embedEtcd.yaml
+      - COMMON_STORAGETYPE=local
+    ports:
+      - "${MILVUS_DB_HTTP_PORT:-9091}:9091"
+      - "${MILVUS_DB_PORT:-19530}:19530"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
       interval: 30s
-      start_period: 90s
       timeout: 20s
       retries: 3
-    ports:
-      - "19530:19530"
-      - "9091:9091"
-    depends_on:
-      - "etcd"
-      - "minio"
+      start_period: 90s
 
-  neo4j:
-    image: neo4j:5.26.4
-    container_name: neo4j
-    ports:
-      - "7474:7474"
-      - "7687:7687"
+  neo4j-db:
+    restart: always
+    ports: #<host_port>:<container_port>
+      - "${GRAPH_DB_HTTP_PORT:-7474}:7474"
+      - "${GRAPH_DB_PORT:-7687}:7687"
     environment:
-      - NEO4J_AUTH=neo4j/password
-      - NEO4J_PLUGINS=["apoc"]
+      NEO4J_AUTH: "${GRAPH_DB_USERNAME}/${GRAPH_DB_PASSWORD}"
+      NEO4J_PLUGINS: '["apoc"]'
+    image: neo4j:5.26.4
+
+  arango-db:
+    image: arangodb/arangodb:3.12.4
+    environment:
+      - ARANGO_DB_USERNAME=${ARANGO_DB_USERNAME}
+      - ARANGO_ROOT_PASSWORD=${ARANGO_DB_PASSWORD}
+    ports:
+      - "${ARANGO_DB_PORT:-8529}:${ARANGO_DB_PORT:-8529}"
+    command: ["arangod", "--experimental-vector-index", "--server.endpoint", "http://0.0.0.0:${ARANGO_DB_PORT:-8529}"]
+
+  elasticsearch:
+    image: elasticsearch:9.1.2
+    ports:
+      - "${ES_PORT:-9200}:${ES_PORT:-9200}"
+      - "${ES_TRANSPORT_PORT:-9300}:${ES_TRANSPORT_PORT:-9300}"
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+    mem_limit: ${ES_MEM_LIMIT:-6442450944}
+
+volumes:
+  minio-data:

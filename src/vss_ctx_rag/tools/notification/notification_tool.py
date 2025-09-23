@@ -15,12 +15,18 @@
 
 """notification_tool.py:"""
 
-from vss_ctx_rag.base import Tool
+from vss_ctx_rag.base.tool import Tool
+from abc import ABC, abstractmethod
 
 
-class NotificationTool(Tool):
-    def __init__(self, name="notification_tool") -> None:
-        super().__init__(name)
+class NotificationTool(Tool, ABC):
+    def __init__(self, name="notification_tool", config=None, tools=None) -> None:
+        super().__init__(name, config, tools)
+        self.update_tool(self.config, tools)
 
+    def update_tool(self, config, tools=None):
+        self.config = config
+
+    @abstractmethod
     async def notify(self, title: str, message: str, metadata: dict):
         pass

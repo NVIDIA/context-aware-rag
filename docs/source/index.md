@@ -29,7 +29,9 @@ Context Aware RAG is a flexible library designed to seamlessly integrate into ex
 - [**Function and Tool Components:**](./overview/architecture.md#components) Easy to create custom functions and tools to support your existing workflows.
 - [**GraphRAG:**](./overview/features.md#retrieval-strategies) Seamlessly extract knowledge graphs from data to support your existing workflows.
 - [**Observability:**](./metrics.md) Monitor and troubleshoot your workflows with any OpenTelemetry-compatible monitoring tool.
-
+- [**Experimental Features:**](./overview/experimental.md)
+    - **Model Context Protocol Tools**: Enable interaction with CA-RAG library through MCP tools when hosted as a service.
+    - **Structured Response**: Enable CA-RAG to return retrieval responses as JSON with specified structure when used as a library or service.
 
 With Context Aware RAG, you can quickly build RAG pipelines to support your existing workflows.
 
@@ -42,10 +44,11 @@ Overview <./overview/index.md>
 Docker Deployment <./guides/docker/index.md>
 Usage <./guides/usage/index.md>
 VSS Blueprint Integration <./vss.md>
-AIQ Plugin Guide <./guides/aiq/index.md>
+NAT Plugin Guide <./guides/nat/index.md>
 Components <./guides/components/index.md>
 Examples <./examples/index.md>
 Metrics <./metrics.md>
+Experimental Features <./overview/experimental.md>
 Troubleshooting <./troubleshooting.md>
 Release Notes <./release-notes.md>
 Code of Conduct <./code-of-conduct.md>

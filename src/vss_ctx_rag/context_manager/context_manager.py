@@ -20,22 +20,21 @@ the tools it has access to.
 """
 
 import asyncio
+import concurrent.futures
+import multiprocessing
+import os
 import random
-import traceback
 import time
+import traceback
 from threading import Thread
 from typing import Dict, Optional
-import os
-import multiprocessing
-import concurrent.futures
 
-from vss_ctx_rag.utils.ctx_rag_logger import TimeMeasure, logger
+from vss_ctx_rag.context_manager.context_manager_handler import ContextManagerHandler
+from vss_ctx_rag.utils.ctx_rag_logger import Metrics, logger
+from vss_ctx_rag.utils.globals import DEFAULT_CONTEXT_MANAGER_CALL_TIMEOUT
 from vss_ctx_rag.utils.otel import init_otel
-from vss_ctx_rag.context_manager.context_manager_handler import (
-    ContextManagerHandler,
-)
-from vss_ctx_rag.utils.utils import RequestInfo
-from vss_ctx_rag.utils.utils import validate_config
+import datetime
+
 
 WAIT_ON_PENDING = 10  # Amount of time to wait before clearing the pending
 
@@ -47,21 +46,34 @@ class ContextManagerProcess(mp_ctx.Process):
         self,
         config: Dict,
         process_index: int,
-        req_info: Optional[RequestInfo] = None,
     ) -> None:
         logger.info(f"Initializing Context Manager Process no.: {process_index}")
         super().__init__()
         self._lock = mp_ctx.Lock()
         self._pending_requests_lock = mp_ctx.Lock()
         self._queue = mp_ctx.Queue()
+        self._input_queue = mp_ctx.Queue()
         self._response_queue = mp_ctx.Queue()
+        self._configure_queue = mp_ctx.Queue()
+        self._reset_queue = mp_ctx.Queue()
         self._stop = mp_ctx.Event()
         self._pending_add_doc_requests = []
         self._request_start_times = {}
         self.config = config
         self.process_index = process_index
-        self.req_info = req_info
         self._init_done_event = mp_ctx.Event()
+        timeout_env = os.getenv("CONTEXT_MANAGER_CALL_TIMEOUT")
+        try:
+            self.timeout = (
+                int(timeout_env)
+                if timeout_env is not None
+                else DEFAULT_CONTEXT_MANAGER_CALL_TIMEOUT
+            )
+        except ValueError:
+            logger.warning(
+                f"Invalid CONTEXT_MANAGER_CALL_TIMEOUT value: {timeout_env}, using default 3600s (1 hour)"
+            )
+            self.timeout = DEFAULT_CONTEXT_MANAGER_CALL_TIMEOUT
 
     def wait_for_initialization(self):
         """Wait for the process initialization to complete
@@ -84,17 +96,13 @@ class ContextManagerProcess(mp_ctx.Process):
         ]:
             exporter_type = os.environ.get("VIA_CTX_RAG_EXPORTER", "console")
             endpoint = os.environ.get("VIA_CTX_RAG_OTEL_ENDPOINT", "")
-            service_name = (
-                f"vss-ctx-rag-{self.req_info.uuid if self.req_info else 'default'}"
-            )
+            service_name = f"vss-ctx-rag-{self.config.get('context_manager', {}).get('uuid', 'default')}"
             init_otel(
                 service_name=service_name,
                 exporter_type=exporter_type,
                 endpoint=endpoint,
             )
-        self.cm_handler = ContextManagerHandler(
-            self.config, self.process_index, self.req_info
-        )
+        self.cm_handler = ContextManagerHandler(self.config, self.process_index)
         self._init_done_event.set()
 
     def start_bg_loop(self) -> None:
@@ -106,6 +114,7 @@ class ContextManagerProcess(mp_ctx.Process):
 
     def stop(self):
         """Stop the process"""
+        logger.info(f"Stopping Context Manager Process no.: {self.process_index}")
         self._stop.set()
         self.join()
 
@@ -119,19 +128,38 @@ class ContextManagerProcess(mp_ctx.Process):
             self.t = Thread(target=self.start_bg_loop, daemon=True)
             self.t.start()
             self._initialize()
+            lastTime = datetime.datetime.now()
 
             while not self._stop.is_set():
                 with self._lock:
                     qsize = self._queue.qsize()
 
-                    if (qsize) == 0:
+                    if qsize == 0:
+                        period = datetime.datetime.now()
+                        if (period - lastTime).total_seconds() >= 20:
+                            logger.debug(
+                                f"Process Index: {self.process_index} - No items in queue, time: {period.strftime('%H:%M:%S')}"
+                            )
+                            lastTime = period
                         time.sleep(0.01)
                         continue
 
-                    item = self._queue.get()
+                    logger.debug(
+                        f"Process Index: {self.process_index} - Queue size: {qsize}"
+                    )
+                    try:
+                        item = self._queue.get(timeout=self.timeout)
+                    except Exception as e:
+                        logger.error(
+                            f"Process Index: {self.process_index} - Error getting item from queue: {e}"
+                        )
+                        continue
+                    logger.debug(
+                        f"Process Index: {self.process_index} - Processing item: {item}"
+                    )
                     if item and "add_doc" in item:
                         logger.debug(
-                            f"Processing document "
+                            f"Process Index: {self.process_index} - Processing document "
                             f"{item['add_doc']['doc_content']['doc_i']}: "
                             f"{item['add_doc']['doc_content']['doc']}"
                         )
@@ -143,78 +171,149 @@ class ContextManagerProcess(mp_ctx.Process):
                         )
                         self._add_pending_request(future)
                     elif item and "reset" in item:
-                        state = item["reset"]
-                        with TimeMeasure("context_manager/reset", "green"):
-                            stop_time = time.time() + WAIT_ON_PENDING
-                            while True:
+                        logger.debug(
+                            f"Process Index: {self.process_index} - Processing reset request: {item['reset']}"
+                        )
+                        try:
+                            state = item["reset"]
+                            with Metrics(
+                                "context_manager/reset",
+                                "green",
+                                span_kind=Metrics.SPAN_KIND["CHAIN"],
+                            ) as tm:
+                                tm.input(state)
+                                stop_time = time.time() + WAIT_ON_PENDING
+                                while True:
+                                    with self._pending_requests_lock:
+                                        pending_count = len(
+                                            self._pending_add_doc_requests
+                                        )
+                                        if (
+                                            not pending_count
+                                            or time.time() >= stop_time
+                                        ):
+                                            break
+                                    time.sleep(2)
+                                    logger.debug(
+                                        f"Process Index: {self.process_index} - Completing pending requests...{pending_count}"
+                                    )
+
                                 with self._pending_requests_lock:
-                                    pending_count = len(self._pending_add_doc_requests)
-                                    if not pending_count or time.time() >= stop_time:
-                                        break
-
-                                time.sleep(2)
-                                logger.info(
-                                    f"Completing pending requests...{pending_count}"
+                                    self._pending_add_doc_requests = []
+                                future = asyncio.run_coroutine_threadsafe(
+                                    self.cm_handler.areset(state), loop=self.event_loop
                                 )
-
-                            with self._pending_requests_lock:
-                                self._pending_add_doc_requests = []
-                            future = asyncio.run_coroutine_threadsafe(
-                                self.cm_handler.areset(state), loop=self.event_loop
+                                future.result(timeout=self.timeout)
+                                self._reset_queue.put({"success": "true"})
+                        except Exception as e:
+                            logger.error(
+                                f"Process Index: {self.process_index} - Error resetting context manager process: {e}"
                             )
-                            future.result()
+                            self._reset_queue.put({"error": str(e)})
                     elif item and "call" in item:
-                        with TimeMeasure("context_manager/call-manager", "blue"):
+                        logger.debug(
+                            f"Process Index: {self.process_index} - Processing call request: {item['call']}"
+                        )
+                        with Metrics(
+                            "context_manager/call-manager",
+                            "blue",
+                            span_kind=Metrics.SPAN_KIND["CHAIN"],
+                        ) as tm:
                             # TODO: Wait for add docs to finish
-                            with TimeMeasure(
+                            with Metrics(
                                 "context_manager/call/pending_add_doc", "blue"
-                            ):
+                            ) as tm:
                                 with self._pending_requests_lock:
                                     pending_requests_copy = (
                                         self._pending_add_doc_requests.copy()
                                     )
-                                done, not_done = concurrent.futures.wait(
-                                    pending_requests_copy
+                                logger.debug(
+                                    f"Process Index: {self.process_index} - Waiting for {len(pending_requests_copy)} add_doc requests to complete, {item['call']}"
+                                )
+                                done, _ = concurrent.futures.wait(pending_requests_copy)
+                                logger.debug(
+                                    f"Process Index: {self.process_index} - Pending Add Doc requests Done: {len(done)} requests"
                                 )
                                 # Check each completed future for exceptions
                                 for future in done:
                                     try:
-                                        future.result()  # This will raise the exception if one occurred
+                                        logger.debug(
+                                            f"Process Index: {self.process_index} - Processing add_doc request..."
+                                        )
+                                        future.result(
+                                            timeout=self.timeout
+                                        )  # This will raise the exception if one occurred
                                     except Exception as e:
                                         logger.error(
-                                            f"Some add_doc failed to complete: {e}"
+                                            f"Process Index: {self.process_index} - Some add_doc failed to complete: {e}"
                                         )
+
                             try:
+                                tm.input(item["call"])
                                 state = item["call"]
+                                logger.debug(
+                                    f"Process Index: {self.process_index} - context manager call"
+                                )
                                 future = asyncio.run_coroutine_threadsafe(
                                     self.cm_handler.call(state), self.event_loop
                                 )
-                                self._response_queue.put(future.result())
+                                try:
+                                    result = future.result(timeout=self.timeout)
+                                    self._response_queue.put(result)
+                                    logger.debug(
+                                        f"Process Index: {self.process_index} - Context manager call result: {result}"
+                                    )
+                                except concurrent.futures.TimeoutError as e:
+                                    logger.error(
+                                        f"Process Index: {self.process_index} - Timeout waiting for context manager call result {self.timeout}s"
+                                    )
+                                    self._response_queue.put({"error": str(e)})
                             except Exception as e:
-                                traceback.print_exc()
-                                logger.error(f"Error calling context manager: {e}")
-                                self._response_queue.put({"error": f"{e}"})
-                    elif item and "update" in item:
-                        self.cm_handler.update(item["update"])
-                    elif item and "configure_update" in item:
-                        try:
-                            self.cm_handler.configure_update(
-                                item["configure_update"]["config"],
-                                item["configure_update"]["req_info"],
-                            )
-                        except Exception as e:
-                            logger.error(f"Error in updating config: {e}")
-                            self._response_queue.put({"error": f"{e}"})
+                                tm.error(e)
+                                logger.error(
+                                    f"Process Index: {self.process_index} - Error calling context manager: {e}"
+                                )
+                                self._response_queue.put({"error": str(e)})
+                    elif item and ("configure" in item):
+                        with Metrics(
+                            "context_manager/configure",
+                            "purple",
+                            span_kind=Metrics.SPAN_KIND["UNKNOWN"],
+                        ) as tm:
+                            if "configure" in item:
+                                tm.input(item["configure"])
+                                logger.debug(
+                                    f"Process Index: {self.process_index} - context manager configure {item['configure']['config']}"
+                                )
+                                try:
+                                    future = asyncio.run_coroutine_threadsafe(
+                                        self.cm_handler.aconfigure(
+                                            item["configure"]["config"]
+                                        ),
+                                        loop=self.event_loop,
+                                    )
+                                    future.result(timeout=self.timeout)
+                                    # Update stored config to ensure reinitializations use the latest config
+                                    self.config = item["configure"]["config"]
+                                    self._configure_queue.put({"success": "true"})
+                                except Exception as e:
+                                    tm.error(e)
+                                    logger.error(
+                                        f"Process Index: {self.process_index} - Error in configuring context manager: {e}"
+                                    )
+                                    self._configure_queue.put({"error": str(e)})
 
         except Exception as e:
-            logger.error("Exception %s", str(e))
+            logger.error(f"Process Index: {self.process_index} - Exception in run: {e}")
             logger.error(traceback.format_exc())
+            raise e
 
     def _add_pending_request(self, future):
         with self._pending_requests_lock:
             self._pending_add_doc_requests.append(future)
             self._request_start_times[id(future)] = time.time()
-            future.add_done_callback(self._remove_pending_request)
+        # Register callback outside the lock to avoid deadlock if future is already done
+        future.add_done_callback(self._remove_pending_request)
 
     def _remove_pending_request(self, future):
         with self._pending_requests_lock:
@@ -250,36 +349,96 @@ class ContextManagerProcess(mp_ctx.Process):
                                             to be called after document is processed.
 
         """
-        with TimeMeasure("context_manager/add_doc", "pink"):
-            self._queue.put(
-                {
-                    "add_doc": {
-                        "doc_content": {
-                            "doc": doc_content,
-                            "doc_i": doc_i,
-                            "doc_meta": doc_meta,
+        try:
+            logger.debug(
+                f"Process Index: {self.process_index} - context manager add doc"
+            )
+            with Metrics("context_manager/add_doc", "pink"):
+                self._queue.put(
+                    {
+                        "add_doc": {
+                            "doc_content": {
+                                "doc": doc_content,
+                                "doc_i": doc_i,
+                                "doc_meta": doc_meta,
+                            }
                         }
                     }
-                }
+                )
+            return {"success": "true"}
+        except Exception as e:
+            logger.error(
+                f"Process Index: {self.process_index} - Error adding document: {e}"
             )
+            return {"error": f"Error adding document: {e}"}
 
-    def update(self, config):
-        self._queue.put({"update": config})
-
-    def configure_update(self, config, req_info):
-        self._queue.put({"configure_update": {"config": config, "req_info": req_info}})
+    def configure(self, config):
+        logger.debug(
+            f"Process Index: {self.process_index} - context manager configure {config}"
+        )
+        try:
+            self._queue.put({"configure": {"config": config}})
+            logger.debug(
+                f"Process Index: {self.process_index} - context manager configure queue size: {self._queue.qsize()}"
+            )
+            output = self._configure_queue.get(timeout=self.timeout)
+            logger.debug(
+                f"Process Index: {self.process_index} - context manager configure output: {output}"
+            )
+            if isinstance(output, dict) and "error" in output:
+                raise Exception(output["error"])
+            return output
+        except Exception as e:
+            logger.error(
+                f"Process Index: {self.process_index} - Error configuring context manager process: {e}"
+            )
+            return {"error": f"Error configuring context manager process: {e}"}
 
     def call(self, state):
-        self._queue.put({"call": state})
-        return self._response_queue.get()
+        try:
+            logger.debug(
+                f"Process Index: {self.process_index} - context manager call {state}"
+            )
+            self._queue.put({"call": state})
+            logger.debug(
+                f"Process Index: {self.process_index} - context manager call queue size: {self._queue.qsize()}"
+            )
+            output = self._response_queue.get(timeout=self.timeout)
+            logger.debug(
+                f"Process Index: {self.process_index} - context manager call output: {output}"
+            )
+            if isinstance(output, dict) and "error" in output:
+                raise Exception(output["error"])
+            return output
+        except Exception as e:
+            logger.error(
+                f"Process Index: {self.process_index} - Error calling context manager process: {e}"
+            )
+            logger.error(traceback.format_exc())
+            return {"error": f"Error calling context manager process: {e}"}
 
     def reset(self, state):
-        self._queue.put({"reset": state})
-
-
-class ReqInfo:
-    def __init__(self, **entries):
-        self.__dict__.update(entries)
+        try:
+            logger.debug(
+                f"Process Index: {self.process_index} - context manager reset {state}"
+            )
+            self._queue.put({"reset": state})
+            logger.debug(
+                f"Process Index: {self.process_index} - context manager reset queue size: {self._queue.qsize()}"
+            )
+            output = self._reset_queue.get(timeout=self.timeout)
+            logger.debug(
+                f"Process Index: {self.process_index} - context manager reset output: {output}"
+            )
+            if isinstance(output, dict) and "error" in output:
+                raise Exception(output["error"])
+            return output
+        except Exception as e:
+            logger.error(
+                f"Process Index: {self.process_index} - Error resetting context manager process: {e}"
+            )
+            logger.error(traceback.format_exc())
+            return {"error": f"Error resetting context manager process: {e}"}
 
 
 class ContextManager:
@@ -287,17 +446,11 @@ class ContextManager:
         self,
         config: Dict,
         process_index: Optional[int] = random.randint(0, 1000000),
-        req_info: Optional[RequestInfo] = None,
     ) -> None:
-        try:
-            validate_config(config)
-        except Exception as e:
-            logger.error(f"Config validation failed: {e}")
-            raise
         self._process_index = process_index
         logger.debug(f"Initializing Context Manager index: {self._process_index}")
         try:
-            self.process = ContextManagerProcess(config, self._process_index, req_info)
+            self.process = ContextManagerProcess(config, self._process_index)
             self.process.start()
             if (
                 os.getenv("CA_RAG_ENABLE_WARMUP", "false").lower() == "true"
@@ -330,42 +483,39 @@ class ContextManager:
             doc_i (Optional[int]): Document index.
             doc_meta (Optional[dict]): Optional metadata associated with the document.
         """
-        self.process.add_doc(doc_content, doc_i, doc_meta, callback)
+        logger.debug(
+            f"Process Index: {self._process_index} - context manager - add doc"
+        )
+        output = self.process.add_doc(doc_content, doc_i, doc_meta, callback)
+        logger.debug(
+            f"Process Index: {self._process_index} - context manager - add doc output: {output}"
+        )
+        return output
 
-    def update(self, config):
-        try:
-            validate_config(config)
-        except Exception as e:
-            logger.error(f"Config validation failed: {e}")
-            raise
-        self.process.update(config=config)
-
-    def configure_update(self, config: Dict, req_info):
-        try:
-            validate_config(config)
-        except Exception as e:
-            logger.error(f"Config validation failed: {e}")
-            raise
-        req_info_obj = None
-        if req_info:
-            req_info_obj = ReqInfo(
-                **{
-                    "summarize": req_info.summarize,
-                    "enable_chat": req_info.enable_chat,
-                    "is_live": req_info.is_live,
-                    "uuid": req_info.stream_id,
-                    "caption_summarization_prompt": req_info.caption_summarization_prompt,
-                    "summary_aggregation_prompt": req_info.summary_aggregation_prompt,
-                    "chunk_size": req_info.chunk_size,
-                    "summary_duration": req_info.summary_duration,
-                    "rag_type": req_info.rag_type,
-                }
-            )
-        self.process.configure_update(config=config, req_info=req_info_obj)
+    def configure(self, config):
+        logger.debug(
+            f"Process Index: {self._process_index} - context manager - configure"
+        )
+        output = self.process.configure(config=config)
+        logger.debug(
+            f"Process Index: {self._process_index} - context manager - configure output: {output}"
+        )
+        return output
 
     def call(self, state):
-        return self.process.call(state)
+        logger.debug(f"Process Index: {self._process_index} - context manager - call")
+        output = self.process.call(state)
+        logger.debug(
+            f"Process Index: {self._process_index} - context manager - call output: {output}"
+        )
+        return output
 
     def reset(self, state):
-        logger.debug(f"Resetting Context Manager index: {self._process_index}")
-        return self.process.reset(state)
+        logger.debug(
+            f"Process Index: {self._process_index} - context manager reset {state}"
+        )
+        output = self.process.reset(state)
+        logger.debug(
+            f"Process Index: {self._process_index} - context manager - reset output: {output}"
+        )
+        return output

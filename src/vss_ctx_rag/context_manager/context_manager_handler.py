@@ -21,41 +21,21 @@ the tools it has access to.
 
 import asyncio
 import copy
-import traceback
-import time
 import json
-from typing import Dict, Optional
-import os
+import traceback
+from typing import Dict, Optional, Union
 
-from vss_ctx_rag.base import Function
-from vss_ctx_rag.utils.ctx_rag_logger import TimeMeasure, logger
-from vss_ctx_rag.functions.notification import Notifier
-from vss_ctx_rag.functions.summarization import (
-    BatchSummarization,
-)
-from vss_ctx_rag.tools.llm import ChatOpenAITool
-from vss_ctx_rag.tools.notification import AlertSSETool
-from vss_ctx_rag.tools.storage import MilvusDBTool, Neo4jGraphDB
-from vss_ctx_rag.utils.globals import (
-    DEFAULT_BATCH_SUMMARIZATION_BATCH_SIZE,
-    DEFAULT_LLM_PARAMS,
-    DEFAULT_GRAPH_RAG_BATCH_SIZE,
-    DEFAULT_RAG_TOP_K,
-    LLM_TOOL_NAME,
-    DEFAULT_MULTI_CHANNEL,
-    DEFAULT_CHAT_HISTORY,
-)
-from vss_ctx_rag.functions.rag.chat_function import ChatFunction
-
-from vss_ctx_rag.functions.rag.graph_rag.graph_extraction_func import (
-    GraphExtractionFunc,
-)
-from vss_ctx_rag.functions.rag.graph_rag.graph_retrieval_func import GraphRetrievalFunc
-from vss_ctx_rag.functions.rag.vector_rag.vector_retrieval_func import (
-    VectorRetrievalFunc,
-)
-from vss_ctx_rag.utils.utils import RequestInfo
+from vss_ctx_rag.base.function import Function
+from vss_ctx_rag.base.tool import Tool
 from vss_ctx_rag.utils.globals import DEFAULT_CONCURRENT_DOC_PROCESSING_LIMIT
+from vss_ctx_rag.utils.ctx_rag_logger import Metrics, logger
+from vss_ctx_rag.tools.storage.storage_tool import StorageTool
+from vss_ctx_rag.models.context_manager_models import (
+    ContextManagerConfig,
+)
+from vss_ctx_rag.functions.function_factory import FunctionFactory
+from vss_ctx_rag.tools.tool_factory import ToolFactory
+from pydantic import ValidationError
 
 
 class ContextManagerHandler:
@@ -76,327 +56,134 @@ class ContextManagerHandler:
         self,
         config: Dict,
         process_index: int,
-        req_info: Optional[RequestInfo] = None,
     ) -> None:
         """Initialize the context manager handler.
 
         Args:
             config: Configuration dictionary containing system settings
             process_index: Unique identifier for this handler instance
-            req_info: Optional request-specific information
         """
         logger.info(f"Initializing Context Manager Handler no.: {process_index}")
 
         self._functions: dict[str, Function] = {}
-        self.config = config
+        self.tools: dict[str, Dict[str, Tool]] = {}
         self.auto_indexing: Optional[bool] = None
         self.curr_doc_index: int = -1
-        self.rag_type = None
-        self.milvus_db: MilvusDBTool = None
-        self.chat_llm: ChatOpenAITool = None
-        self.llm: ChatOpenAITool = None
-        self.notification_llm: ChatOpenAITool = None
+        self.storage_tools: Dict[str, StorageTool] = {}
         self._process_index = process_index
-        self.neo4j_uri = None
-        self.neo4j_username = None
-        self.neo4j_password = None
-        self.neo4jDB: Neo4jGraphDB = None
-        self.configure_init(config, req_info)
+        self.uuid = config.get("context_manager", {}).get("uuid", None)
         self._doc_processing_semaphore = asyncio.Semaphore(
             DEFAULT_CONCURRENT_DOC_PROCESSING_LIMIT
         )
 
-    def setup_neo4j(self, chat_config: Dict):
-        try:
-            self.neo4j_uri = os.getenv("GRAPH_DB_URI")
-            if not self.neo4j_uri:
-                raise ValueError("GRAPH_DB_URI not set. Please set GRAPH_DB_URI.")
-            self.neo4j_username = os.getenv("GRAPH_DB_USERNAME")
-            if not self.neo4j_username:
-                raise ValueError(
-                    "GRAPH_DB_USERNAME not set. Please set GRAPH_DB_USERNAME."
-                )
-            self.neo4j_password = os.getenv("GRAPH_DB_PASSWORD")
-            if not self.neo4j_password:
-                raise ValueError(
-                    "GRAPH_DB_PASSWORD not set. Please set GRAPH_DB_PASSWORD."
-                )
-            if (
-                self.neo4j_uri is not None
-                and self.neo4j_username is not None
-                and self.neo4j_password is not None
-            ):
-                self.neo4jDB = Neo4jGraphDB(
-                    url=self.neo4j_uri,
-                    username=self.neo4j_username,
-                    password=self.neo4j_password,
-                    embedding_model_name=chat_config["embedding"]["model"],
-                    embedding_base_url=chat_config["embedding"]["base_url"],
-                )
-        except Exception as e:
-            logger.error(f"Error setting up Neo4j: {e}")
-            raise e
+        self.configure(config)
 
-    def configure_init(self, config: Dict, req_info: Optional[RequestInfo] = None):
+    def configure(
+        self,
+        config: Union[Dict, ContextManagerConfig],
+    ):
+        """Validate and store configuration, then invoke asynchronous setup."""
+
+        asyncio.run(self.aconfigure(config))
+
+    async def aconfigure(self, config: ContextManagerConfig):
         """Initialize system components based on configuration.
 
-        Sets up LLM instances, database connections, and function handlers
-        based on the provided configuration.
+        Sets up function handlers based on the provided configuration using
+        the FunctionFactory.
 
         Args:
             config: System configuration dictionary
-            req_info: Optional request-specific information
         """
-        logger.debug(
-            f"Configuring init for {self._process_index} with config: {config}"
-        )
-        # Init time Milvus DB config
-        chat_config = copy.deepcopy(config.get("chat"))
-        summ_config = copy.deepcopy(config.get("summarization"))
-        collection_name = "summary_till_now_" + str(time.time()).replace(".", "_")
-        if req_info and req_info.uuid:
-            collection_name = "summary_till_now_" + req_info.uuid
-        self.milvus_db = MilvusDBTool(
-            collection_name=collection_name,
-            host=config["milvus_db_host"],
-            port=config["milvus_db_port"],
-            reranker_base_url=chat_config["reranker"]["base_url"],
-            reranker_model_name=chat_config["reranker"]["model"],
-            embedding_base_url=chat_config["embedding"]["base_url"],
-            embedding_model_name=chat_config["embedding"]["model"],
-        )
-        # Init time Notification config
-        notification_config = config.get("notification")
-        if notification_config and notification_config.get("enable"):
-            notification_llm_params = notification_config.get("llm")
-            if notification_llm_params["model"] == "gpt-4o":
-                api_key = os.environ["OPENAI_API_KEY"]
-            else:
-                api_key = config["api_key"]
-            logger.info(
-                "Using %s as the notification llm", notification_llm_params["model"]
-            )
-            notification_llm = ChatOpenAITool(
-                api_key=api_key, **notification_llm_params
-            )
-            self.add_function(
-                Notifier("notification")
-                .add_tool(LLM_TOOL_NAME, notification_llm)
-                .add_tool(
-                    "notification_tool",
-                    AlertSSETool(endpoint=notification_config.get("endpoint")),
-                )
-                .config(**notification_config)
-                .done()
-            )
-        else:
-            logger.info("Notifications disabled")
-        # Init time Chat config
-        chat_config = copy.deepcopy(config.get("chat"))
-        chat_llm_params = (
-            chat_config.get(LLM_TOOL_NAME, DEFAULT_LLM_PARAMS)
-            if chat_config
-            else DEFAULT_LLM_PARAMS
-        )
-        if chat_llm_params["model"] == "gpt-4o":
-            api_key = os.environ["OPENAI_API_KEY"]
-        else:
-            api_key = config["api_key"]
-        logger.info("Using %s as the chat llm", chat_llm_params["model"])
-        self.chat_llm = ChatOpenAITool(api_key=api_key, **chat_llm_params)
-        # Init time Summarization config
-        summ_config = copy.deepcopy(config.get("summarization"))
-        llm_params = summ_config.get(LLM_TOOL_NAME, DEFAULT_LLM_PARAMS)
-        if llm_params["model"] == "gpt-4o":
-            api_key = os.environ["OPENAI_API_KEY"]
-        else:
-            api_key = config["api_key"]
-        logger.info("Using %s as the summarization llm", llm_params["model"])
-        self.llm = ChatOpenAITool(api_key=api_key, **llm_params)
-        # Init time Neo4j config
-        if chat_config.get("rag", None) == "graph-rag":
-            self.setup_neo4j(chat_config)
-            self.rag_type = chat_config.get("rag")
-        if chat_config.get("rag", None) == "vector-rag":
-            self.rag_type = chat_config.get("rag")
-
-        if req_info:
-            self.configure_update(config, req_info)
-
-    def configure_update(self, config: Dict, req_info):
         try:
-            caption_summarization_prompt = ""
-            summary_aggregation_prompt = ""
-            if req_info:
-                caption_summarization_prompt = req_info.caption_summarization_prompt
-                summary_aggregation_prompt = req_info.summary_aggregation_prompt
-            summ_config = copy.deepcopy(config.get("summarization"))
+            for function_name in config["functions"]:
+                await self.aremove_function(function_name)
 
-            try:
-                self.default_caption_prompt = summ_config["prompts"]["caption"]
-                caption_summarization_prompt = (
-                    caption_summarization_prompt
-                    or summ_config["prompts"]["caption_summarization"]
-                )
-                summ_config["prompts"]["caption_summarization"] = (
-                    caption_summarization_prompt
-                )
-                summary_aggregation_prompt = summary_aggregation_prompt or (
-                    summ_config["prompts"]["summary_aggregation"]
-                    if "summary_aggregation" in summ_config["prompts"]
-                    else ""
-                )
-                summ_config["prompts"]["summary_aggregation"] = (
-                    summary_aggregation_prompt
-                )
-            except Exception as e:
-                raise ValueError("Prompt(s) missing!") from e
+            config = ContextManagerConfig(**config)
 
-            enable_summarization = True
-            """
-            TODO: Remove this once we have a way to disable summarization
-            if req_info is None or req_info.summarize is None:
-                enable_summarization = summ_config["enable"]
-            else:
-                enable_summarization = req_info.summarize
-            """
+            self.config = config.resolve_references()
 
-            if enable_summarization and self.get_function("summarization") is None:
-                if summ_config["method"] == "batch":
-                    summ_config["params"] = summ_config.get(
-                        "params",
-                        {
-                            "batch_size": DEFAULT_BATCH_SUMMARIZATION_BATCH_SIZE,
-                        },
-                    )
-                    summ_config["params"]["batch_size"] = summ_config["params"].get(
-                        "batch_size", DEFAULT_BATCH_SUMMARIZATION_BATCH_SIZE
-                    )
-                    try:
-                        if req_info and req_info.is_live:
-                            logger.debug("Req Info: %s", req_info.summary_duration)
-                            logger.debug("Req Info: %s", req_info.chunk_size)
-                            summ_config["params"]["batch_size"] = int(
-                                req_info.summary_duration / req_info.chunk_size
-                            )
-                            logger.info(
-                                "Overriding batch size to %s for live stream",
-                                summ_config["params"]["batch_size"],
-                            )
-                    except Exception as e:
-                        logger.error(
-                            "Overriding batch size failed for live stream: %s", e
-                        )
-                    self.add_function(
-                        BatchSummarization("summarization")
-                        .add_tool(LLM_TOOL_NAME, self.llm)
-                        .add_tool("vector_db", self.milvus_db)
-                        .config(**summ_config)
-                        .done()
+            logger.debug(
+                f"Configuring init for {self._process_index} with config: {config}"
+            )
+
+            await self.aconfigure_tools(self.config)
+
+            await self.aconfigure_functions(self.config)
+        except ValidationError as e:
+            logger.error(f"Error in configuring context manager handler: {e}")
+            logger.error(f"Error in configuring context manager handler: {e.errors()}")
+            raise
+
+        except Exception as e:
+            logger.error(f"Error in configuring context manager handler: {e}")
+            logger.error(traceback.format_exc())
+
+    async def aconfigure_tools(self, config: ContextManagerConfig):
+        """Configure tools using the ToolFactory."""
+        logger.info("Configuring tools using ToolFactory")
+        self.tools.update(ToolFactory.create_all_tools(config, self.tools))
+        logger.info(f"TOOLS: {self.tools}")
+
+    async def aconfigure_functions(
+        self,
+        config: ContextManagerConfig,
+    ):
+        """
+        Configure functions using the FunctionFactory.
+
+        This method uses the FunctionFactory to create functions based on the
+        configuration's function list, replacing the previous hardcoded logic.
+
+        Args:
+            config: Complete configuration provided by the caller.
+        """
+        logger.debug("Configuring functions using FunctionFactory")
+
+        function_factory = FunctionFactory(config, self.tools)
+
+        try:
+            new_functions = function_factory.create_functions()
+
+            functions_to_add = config.context_manager.functions
+
+            if not functions_to_add:
+                functions_to_add = list(new_functions.keys())
+                logger.info(
+                    "No functions specified in context_manager.functions, adding all functions to context manager"
+                )
+
+            if len(functions_to_add) != len(new_functions):
+                logger.warning(
+                    f"Number of functions to add ({len(functions_to_add)}) does not match number of functions created ({len(new_functions)})"
+                )
+                raise ValueError(
+                    f"Number of functions to add ({len(functions_to_add)}) does not match number of functions created ({len(new_functions)})"
+                )
+
+            missing_functions = set(functions_to_add) - set(new_functions.keys())
+            if missing_functions:
+                logger.warning(
+                    f"Functions specified in context_manager.functions not found in created functions: {missing_functions}"
+                )
+                raise ValueError(
+                    f"Functions specified in context_manager.functions not found in created functions: {missing_functions}"
+                )
+
+            for function_name, function_instance in new_functions.items():
+                if function_name in functions_to_add:
+                    self.add_function(function_instance)
+                    logger.info(
+                        f"Successfully configured and added function to context manager: {function_name}"
                     )
                 else:
-                    # should never reach here. Should be validated by the config schema
-                    raise ValueError("Incorrect summarization config")
-            elif enable_summarization is False:
-                self.remove_function("summarization")
-                logger.info("Summarization disabled with the API call")
-            chat_config = copy.deepcopy(config.get("chat"))
-
-            if (
-                req_info
-                and req_info.rag_type
-                and req_info.enable_chat
-                and (
-                    req_info.rag_type == "vector-rag"
-                    or req_info.rag_type == "graph-rag"
-                )
-            ):
-                chat_config["rag"] = req_info.rag_type
-            if req_info is None or req_info.enable_chat:
-                if (
-                    chat_config["rag"] != "vector-rag"
-                    and chat_config["rag"] != "graph-rag"
-                ):
-                    self.remove_function("chat")
                     logger.info(
-                        "Both graph_rag and vector_rag are disabled. Q&A is disabled"
+                        f"Function created but not added to context manager: {function_name}"
                     )
-                elif chat_config["rag"] != self.rag_type:
-                    self.remove_function("chat")
-                    logger.info(
-                        f"Removing chat function due to rag type change from {self.rag_type} to {chat_config['rag']}"
-                    )
-                    self.rag_type = None
-                if self.get_function("chat") is None:
-                    logger.info("Setting up QnA, rag type: %s", chat_config["rag"])
 
-                    chat_config["params"] = chat_config.get(
-                        "params",
-                        {
-                            "batch_size": DEFAULT_GRAPH_RAG_BATCH_SIZE,
-                            "top_k": DEFAULT_RAG_TOP_K,
-                        },
-                    )
-                    chat_config["params"]["batch_size"] = chat_config["params"].get(
-                        "batch_size", DEFAULT_GRAPH_RAG_BATCH_SIZE
-                    )
-                    chat_config["params"]["top_k"] = chat_config["params"].get(
-                        "top_k", DEFAULT_RAG_TOP_K
-                    )
-                    chat_config["params"]["multi_channel"] = chat_config["params"].get(
-                        "multi_channel", DEFAULT_MULTI_CHANNEL
-                    )
-                    chat_config["params"]["chat_history"] = chat_config["params"].get(
-                        "chat_history", DEFAULT_CHAT_HISTORY
-                    )
-                    if chat_config["rag"] == "graph-rag":
-                        if self.neo4jDB is None:
-                            self.setup_neo4j(chat_config)
-                        self.add_function(
-                            ChatFunction("chat")
-                            .add_function(
-                                "extraction_function",
-                                GraphExtractionFunc("extraction_function")
-                                .add_tool("graph_db", self.neo4jDB)
-                                .add_tool(LLM_TOOL_NAME, self.chat_llm)
-                                .config(**chat_config)
-                                .done(),
-                            )
-                            .add_function(
-                                "retrieval_function",
-                                GraphRetrievalFunc("retrieval_function")
-                                .add_tool("graph_db", self.neo4jDB)
-                                .add_tool(LLM_TOOL_NAME, self.chat_llm)
-                                .config(**chat_config)
-                                .done(),
-                            )
-                            .config(**chat_config)
-                            .done(),
-                        )
-                        self.rag_type = "graph-rag"
-                    elif chat_config["rag"] == "vector-rag":
-                        self.add_function(
-                            ChatFunction("chat")
-                            .add_function(
-                                "retrieval_function",
-                                VectorRetrievalFunc("retrieval_function")
-                                .add_tool("vector_db", self.milvus_db)
-                                .add_tool(LLM_TOOL_NAME, self.chat_llm)
-                                .config(**chat_config)
-                                .done(),
-                            )
-                            .config(**chat_config)
-                            .done(),
-                        )
-                        self.rag_type = "vector-rag"
-            else:
-                if req_info and req_info.enable_chat is False:
-                    self.remove_function("chat")
-                    self.rag_type = None
-                    logger.info("Chat/Q&A disabled with the API call")
         except Exception as e:
+            logger.error(f"Error creating functions with FunctionFactory: {e}")
             logger.error(traceback.format_exc())
-            logger.error(f"Error in updating config: {e}")
             raise
 
     def add_function(self, f: Function):
@@ -408,14 +195,12 @@ class ContextManagerHandler:
     def get_function(self, fname):
         return self._functions[fname] if fname in self._functions else None
 
-    def remove_function(self, fname: str):
+    async def aremove_function(self, fname: str):
         if fname in self._functions:
             logger.debug(
-                f"Removing function {fname} from Context Manager index: {self._process_index}"
+                f"Removing function {fname} from Context Manager index: {self._process_index} with UUID: {self.uuid}"
             )
-            self._functions[fname].areset({"expr": "pk > 0"})
-            for f in self._functions[fname]._functions.values():
-                f.areset({"expr": "pk > 0"})
+            await self._functions[fname].areset({"expr": "pk > 0", "uuid": self.uuid})
             self._functions[fname]._functions.clear()
             del self._functions[fname]
 
@@ -463,24 +248,31 @@ class ContextManagerHandler:
             doc_i = self.curr_doc_index
             self.curr_doc_index += 1
         elif doc_i is None:
-            raise ValueError("Param doc_i missing.")
+            logger.error("Param doc_i missing. Auto-indexing is disabled.")
 
         # Process document through all functions with semaphore control
         async with self._doc_processing_semaphore:
             tasks = []
 
             async def timed_function_call(func, doc, doc_i, doc_meta):
-                with TimeMeasure(f"context_manager/aprocess_doc/{func.name}", "yellow"):
+                with Metrics(f"context_manager/aprocess_doc/{func.name}", "yellow"):
                     return await func.aprocess_doc_(doc, doc_i, doc_meta)
 
-            with TimeMeasure("context_manager/aprocess_doc/total", "green"):
+            with Metrics(
+                "context_manager/aprocess_doc/total",
+                "green",
+                span_kind=Metrics.SPAN_KIND["CHAIN"],
+            ) as tm:
+                tm.input({"doc": doc, "doc_i": doc_i, "doc_meta": doc_meta})
+
                 for _, f in self._functions.items():
                     tasks.append(
                         asyncio.create_task(
                             timed_function_call(f, doc, doc_i, doc_meta), name=f.name
                         )
                     )
-                return await asyncio.gather(*tasks)
+                output = await asyncio.gather(*tasks)
+                return output
 
     async def call(self, state):
         """Execute registered functions with the given state.
@@ -491,21 +283,22 @@ class ContextManagerHandler:
             Dictionary containing results from all function executions
         """
         results = {}
+        with Metrics(
+            "context_manager/call", "green", span_kind=Metrics.SPAN_KIND["CHAIN"]
+        ) as tm:
+            tm.input(state)
 
-        async def timed_call(func_name, call_params):
-            with TimeMeasure(f"context_manager/call/{func_name}", "green"):
-                return await self._functions[func_name](call_params)
-
-        with TimeMeasure("context_manager/call-handler/total", "blue"):
             tasks = []
             task_results = []
             for func, call_params in state.items():
                 tasks.append(
-                    asyncio.create_task(timed_call(func, call_params), name=func)
+                    asyncio.create_task(self._functions[func](call_params), name=func)
                 )
             task_results = await asyncio.gather(*tasks)
             for index, func in enumerate(state):
                 results[func] = task_results[index]
+
+            tm.output(results)
         return results
 
     async def areset(self, state):
@@ -519,6 +312,7 @@ class ContextManagerHandler:
         self.curr_doc_index = -1
         self.auto_indexing = False
         tasks = []
+
         for func, reset_params in state.items():
             if func in self._functions:
                 tasks.append(

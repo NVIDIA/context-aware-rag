@@ -65,7 +65,7 @@ retrieval_function:
 
     rerank_model_name: "nvidia/llama-3.2-nv-rerankqa-1b-v2"
     rerank_model_url: "https://ai.api.nvidia.com/v1/retrieval/nvidia/llama-3_2-nv-rerankqa-1b-v2/reranking"
-    rag_type: "vector-rag" # or "graph-rag"
+    rag_type: "vector-rag" # or "graph-rag" or "foundation-rag"
     chat_batch_size: 1
     summ_batch_size: 5
     summ_batch_max_concurrency: 20
@@ -129,7 +129,7 @@ ingestion_function:
 
     rerank_model_name: "nvidia/llama-3.2-nv-rerankqa-1b-v2"
     rerank_model_url: "https://ai.api.nvidia.com/v1/retrieval/nvidia/llama-3_2-nv-rerankqa-1b-v2/reranking"
-    rag_type: "vector-rag" # or "graph-rag"
+    rag_type: "vector-rag" # or "graph-rag" or "foundation-rag"
     chat_batch_size: 1
     summ_batch_size: 5
     summ_batch_max_concurrency: 20
@@ -158,8 +158,8 @@ nvidia api key for LLM models.
 ### Vector-RAG
 
 ``` bash
-export MILVUS_HOST=<MILVUS_HOST_IP> #milvus host, e.g. localhost
-export MILVUS_PORT=<MILVUS_DB_PORT> #milvus port, e.g. 19530
+export MILVUS_DB_HOST=<MILVUS_HOST_IP> #milvus host, e.g. localhost
+export MILVUS_DB_PORT=<MILVUS_DB_PORT> #milvus port, e.g. 19530
 export NVIDIA_API_KEY=<NVIDIA_API_KEY> #NVIDIA API key
 ```
 
@@ -169,6 +169,13 @@ export NVIDIA_API_KEY=<NVIDIA_API_KEY> #NVIDIA API key
 export GRAPH_DB_URI=<GRAPH_DB_URI> #neo4j uri, e.g. bolt://localhost:7687
 export GRAPH_DB_USERNAME=<GRAPH_DB_USERNAME> #neo4j username, e.g. neo4j
 export GRAPH_DB_PASSWORD=<GRAPH_DB_PASSWORD> #neo4j password, e.g. password
+export NVIDIA_API_KEY=<NVIDIA_API_KEY> #NVIDIA API key
+```
+### Foundation-RAG
+
+``` bash
+export MILVUS_DB_HOST=<MILVUS_HOST_IP> #milvus host, e.g. localhost
+export MILVUS_DB_PORT=<MILVUS_DB_PORT> #milvus port, e.g. 19530
 export NVIDIA_API_KEY=<NVIDIA_API_KEY> #NVIDIA API key
 ```
 

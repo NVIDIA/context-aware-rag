@@ -66,6 +66,7 @@ This example demonstrates how to use NVIDIA's Context-Aware RAG (CA-RAG) system 
 ### Example Notebook
 
 The [pdf_qna.ipynb](https://github.com/NVIDIA/context-aware-rag/blob/main/examples/pdf_qna.ipynb) notebook provides a step-by-step walkthrough of the entire process, including:
+- NV-Ingest Installation
 - Service initialization
 - Document processing and ingestion
 - Question answering examples
