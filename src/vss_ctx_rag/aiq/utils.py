@@ -63,7 +63,7 @@ def aiq_to_vss_config(
             "enable": config.summarize,
             "method": "batch",
             "llm": {
-                "model": llm_dict.get("model", "meta/llama-3.1-70b-instruct"),
+                "model": llm_dict.get("model", "nvidia/llama-3.3-nemotron-super-49b-v1"),
                 "base_url": llm_dict.get(
                     "base_url", "https://integrate.api.nvidia.com/v1"
                 ),
@@ -93,7 +93,7 @@ def aiq_to_vss_config(
                 "batch_size": config.chat_batch_size,
             },
             "llm": {
-                "model": llm_dict.get("model", "meta/llama-3.1-70b-instruct"),
+                "model": llm_dict.get("model", "nvidia/llama-3.3-nemotron-super-49b-v1"),
                 "base_url": llm_dict.get(
                     "base_url", "https://integrate.api.nvidia.com/v1"
                 ),

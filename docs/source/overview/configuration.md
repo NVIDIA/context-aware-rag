@@ -28,7 +28,7 @@ summarization:
    enable: true
    method: "batch"
    llm:
-      model: "meta/llama-3.1-70b-instruct"
+      model: "nvidia/llama-3.3-nemotron-super-49b-v1"
       base_url: "http://localhost:8000/v1"
       max_tokens: 2048
       temperature: 0.2
@@ -97,7 +97,7 @@ notification:
   enable: true
   endpoint: "http://127.0.0.1:60000/via-alert-callback"
   llm:
-    model: "meta/llama-3.1-70b-instruct"
+    model: "nvidia/llama-3.3-nemotron-super-49b-v1"
     base_url: "http://<IP ADDRESS>:<PORT>/v1/"
     max_tokens: 2048
     temperature: 0.2

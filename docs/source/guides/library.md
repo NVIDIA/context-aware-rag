@@ -27,7 +27,7 @@ summarization:
   enable: true
   method: "batch"
   llm:
-    model: meta/llama-3.1-70b-instruct
+    model: nvidia/llama-3.3-nemotron-super-49b-v1
     base_url: https://integrate.api.nvidia.com/v1
     max_tokens: 2048
     temperature: 0.2
@@ -48,7 +48,7 @@ chat:
   params:
     batch_size: 1
   llm:
-    model: meta/llama-3.1-70b-instruct
+    model: nvidia/llama-3.3-nemotron-super-49b-v1
     base_url: https://integrate.api.nvidia.com/v1
     max_tokens: 2048
     temperature: 0.5
