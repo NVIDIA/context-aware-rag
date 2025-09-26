@@ -573,7 +573,7 @@ class GraphExtraction:
             logger.info("No CHAT_FRONTEND_ENDPOINT configured, skipping transcript status update")
             return
 
-        endpoint = f"{frontend_uri}/api/update-text"
+        endpoint = f"{frontend_uri}/api/update-data-stream"
         for doc in docs:
             doc_uuid = doc.metadata.get('uuid')
             if doc_uuid:

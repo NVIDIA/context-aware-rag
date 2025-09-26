@@ -122,7 +122,7 @@ class ContextManagerHandler:
             logger.debug("No CHAT_FRONTEND_ENDPOINT configured, skipping frontend export")
             return
 
-        endpoint = f"{self.frontend_endpoint}/api/update-text"
+        endpoint = f"{self.frontend_endpoint}/api/update-data-stream"
         data = {
             "text": transcript,
             "stream_id": stream_id,
