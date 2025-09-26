@@ -40,6 +40,9 @@ services:
 
   vss-ctx-rag-retriever:
     image: ctx_rag
+    build:
+      context: ../..
+      dockerfile: docker/Dockerfile
     container_name: vss-ctx-rag-retriever
     ports:
       - ${VSS_CTX_PORT_RET:-8000}:8000
@@ -58,6 +61,9 @@ services:
 
   vss-ctx-rag-data-ingestion:
     image: ctx_rag
+    build:
+      context: ../..
+      dockerfile: docker/Dockerfile
     container_name: vss-ctx-rag-data-ingestion
     ports:
       - ${VSS_CTX_PORT_IN:-8001}:8000
