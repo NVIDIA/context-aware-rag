@@ -43,6 +43,13 @@ services:
     build:
       context: ../..
       dockerfile: docker/Dockerfile
+    depends_on:
+      - standalone
+      - neo4j
+      - otel_collector
+      - jaeger
+      - prometheus
+      - cassandra
     container_name: vss-ctx-rag-retriever
     ports:
       - ${VSS_CTX_PORT_RET:-8000}:8000
@@ -64,6 +71,13 @@ services:
     build:
       context: ../..
       dockerfile: docker/Dockerfile
+    depends_on:
+      - standalone
+      - neo4j
+      - otel_collector
+      - jaeger
+      - prometheus
+      - cassandra
     container_name: vss-ctx-rag-data-ingestion
     ports:
       - ${VSS_CTX_PORT_IN:-8001}:8000
