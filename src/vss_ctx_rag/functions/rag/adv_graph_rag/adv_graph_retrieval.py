@@ -136,7 +136,7 @@ class AdvGraphRetrieval:
         try:
             result = await self.graph_db.arun_cypher_query(query)
             entity_types = [record["label"] for record in result]
-            logger.info(f"Found {len(entity_types)} entity types: {entity_types}")
+            logger.info(f"Found {len(entity_types)} entity types")
             return entity_types
         except Exception as e:
             logger.error(f"Error fetching entity types: {e}")
@@ -308,7 +308,7 @@ class AdvGraphRetrieval:
                     processed_results.sort(key=lambda x: x["n"]["end_time"])
                 else:
                     processed_results.sort(key=lambda x: x["n"]["score"], reverse=True)
-            logger.info(f"Semantic search results: {processed_results}")
+            logger.debug(f"Semantic search results: {processed_results}")
             return processed_results
         except Exception as e:
             logger.error(f"Error during semantic search: {e}")
@@ -643,7 +643,11 @@ class AdvGraphRetrieval:
                     logger.info(f"Retrieved {len(temporal_data)} temporal records")
                 else:
                     logger.info("No temporal data found in that time range")
-                    return None
+                    return None, (
+                        datetime.utcfromtimestamp(start_time).strftime("%D %H:%M:%S") if start_time else "now",
+                        datetime.utcfromtimestamp(end_time).strftime("%D %H:%M:%S") if end_time else "max",
+                        stream_ids
+                    )
             else:  # semantic retrieval
                 # Semantic similarity retrieval
                 semantic_data = await self.retrieve_semantic_context(
@@ -657,7 +661,7 @@ class AdvGraphRetrieval:
                 if semantic_data:
                     contexts.extend(semantic_data)
 
-            logger.info(f"Contexts: {contexts}")
+            logger.debug(f"Contexts: {contexts}")
 
             # Relationship-based retrieval
             relationships = analysis.get("relationships", [])
@@ -698,7 +702,7 @@ class AdvGraphRetrieval:
                         documents.append(doc)
 
             logger.info(f"Returning {len(documents)} documents")
-            return documents
+            return documents, None
 
     async def _parse_json_with_retries(self, analysis_func, analysis_type: str, *args, **kwargs) -> Dict:
         """Helper method to retry analysis function calls and parse JSON responses"""

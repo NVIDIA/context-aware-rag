@@ -15,6 +15,7 @@
 
 """adv_graph_rag_func.py: File contains AdvGraphRAGFunc class"""
 
+from datetime import datetime, timezone
 from typing import Optional
 from copy import deepcopy
 import asyncio
@@ -72,48 +73,71 @@ class AdvGraphRAGFunc(Function):
         logger.info(f"Initialized retriever with top_k={self.top_k}")
 
         # Setup prompts with examples
-        self.qa_prompt = ChatPromptTemplate.from_messages(
-            [
-                (
-                    "system",
-                    """You are an AI assistant that answers questions based on the provided context.
+        self.qa_prompt = ChatPromptTemplate.from_messages([
+            (
+                "system",
+                """You are an AI assistant that answers questions based on the provided context.
 
-             The context includes both retrieved information and relevant chat history.
-             Use both the retrieved context and chat history to provide more accurate and contextual answers.
-             If the fetched context is insufficient, formulate a better question to
-             fetch more relevant information.
+                The context includes both retrieved information and relevant chat history.
+                Use both the retrieved context and chat history to provide more accurate and
+                contextual answers.
 
-             You must respond in the following JSON format:
-             {{\
-                 "description": "A description of the answer",\
-                 "answer": "your answer here or null if more info needed",\
-                 "updated_question": "reformulated question to get better database results" or null,\
-                 "confidence": 0.95 // number between 0-1\
-             }}\
+                If you cannot answer the question based on the provided context, formulate a better
+                question to fetch more relevant information.
 
-             Example 1 (when you have enough info):
-             {{\
-                 "description": "A description of the answer",\
-                 "answer": "The worker dropped a box at timestamp 78.0 and it took 39 seconds to remove it",\
-                 "updated_question": null,\
-                 "confidence": 0.95\
-             }}\
+                Do NOT try to reformulate the question just because you think there are not enough
+                timestamps included! Reformulating the question will NOT result in any more
+                information, just answer the question based on the content of the context provided.
 
-             Example 2 (when you need more info):
-             {{\
-                 "description": "A description of the answer",\
-                 "answer": null,\
-                 "updated_question": "What events occurred between timestamp 75 and 80?",\
-                 "confidence": 0\
-             }}\
+                You must respond in the following JSON format:
+                {{\
+                    "description": "A description of the answer",\
+                    "answer": "your answer here or null if more info needed",\
+                    "updated_question": "reformulated question to get better database results" or null,\
+                    "confidence": 0.95 // number between 0-1\
+                }}\
 
-             Only respond with valid JSON. Do not include any other text.
-             """,
-                ),
-                ("human", "Question: {question}\nContext: {context}"),
-            ]
-        )
+                Example 1 (when you have enough info):
+                {{\
+                    "description": "A description of the answer",\
+                    "answer": "The worker dropped a box at timestamp 78.0 and it took 39 seconds to remove it",\
+                    "updated_question": null,\
+                    "confidence": 0.95\
+                }}\
+
+                Example 2 (when you need more info):
+                {{\
+                    "description": "A description of the answer",\
+                    "answer": null,\
+                    "updated_question": "What events occurred between timestamp 75 and 80?",\
+                    "confidence": 0\
+                }}\
+
+                Only respond with valid JSON. Do not include any other text.
+            """),
+            ("human", "Question: {question}\nContext: {context}\nCurrent time: {current_time}"),
+        ])
         logger.info("Initialized QA prompt template")
+
+        # Build a prompt to handle the case where no context is found.
+        # The retrieval strategy is provided and use to tell the user what was tried.
+        self.no_context_prompt = ChatPromptTemplate.from_messages([
+            (
+                "system",
+                """You are an AI assistant that answers questions based on the provided context.
+
+                In this case, the user asked a question and no context was found.
+                This is not an error, your job is to just explain that no database entries exist
+                based on the search criteria and what search criteria was used.
+
+                The retrieval strategy will be provided in the form of: "(start_time, end_time, stream_ids)".
+                Only database entries after "start_time" and before "end_time" were considered and entries were
+                restricted to the stream_ids provided.
+
+                If the stream_ids is empty, ignore the stream_ids and just focus on the timestamps.
+            """),
+            ("human", "Question: {question}\nRetrieval strategy: {retrieval_strategy}"),
+        ])
 
     async def acall(self, state: dict) -> dict:
         """Main QA function with iterative retrieval"""
@@ -134,14 +158,17 @@ class AdvGraphRAGFunc(Function):
             logger.debug(f"Chat history length: {len(self.chat_history)}")
 
             # Initial retrieval
-            context = await self.retriever.retrieve_relevant_context(question)
+            context, retrieval_strategy = await self.retriever.retrieve_relevant_context(question)
             retrieved_context = deepcopy(context)
 
             # If no context is found, assume that we did a temporal retrieval and
             # nothing turned up
             if not context:
-                logger.info("No context found, assuming temporal retrieval")
-                state["response"] = "I apologize, but I have no stored records that are either relevant or in the requested time range."
+                logger.info("No context found")
+                response = await self.chat_llm.ainvoke(
+                    self.no_context_prompt.format(question=question, retrieval_strategy=retrieval_strategy)
+                )
+                state["response"] = response.content
                 return state
 
             # Add relevant chat history to context
@@ -169,7 +196,10 @@ class AdvGraphRAGFunc(Function):
                 logger.info(f"Starting iteration {i + 1}/{self.max_iterations}")
                 # Get answer attempt
                 response = await self.chat_llm.ainvoke(
-                    self.qa_prompt.format(question=question, context=context)
+                    self.qa_prompt.format(
+                        question=question,
+                        context=context,
+                        current_time=datetime.now(timezone.utc))
                 )
 
                 logger.info(f"Response: {response.content}")
@@ -197,7 +227,9 @@ class AdvGraphRAGFunc(Function):
                             if retry_count < self.max_iterations:
                                 response = await self.chat_llm.ainvoke(
                                     self.qa_prompt.format(
-                                        question=question, context=context
+                                        question=question,
+                                        context=context,
+                                        current_time=datetime.now(timezone.utc)
                                     )
                                 )
                                 continue
@@ -213,9 +245,12 @@ class AdvGraphRAGFunc(Function):
                 logger.debug(f"Result: {result}")
 
                 # If we have a confident answer, return it
+                logger.info(f"Confidence threshold: {self.confidence_threshold}")
+                logger.info(f"Result confidence: {result.get('confidence', 0)}")
+                logger.info(f"Result answer: {result.get('answer')}")
                 if (
                     result.get("answer")
-                    and result.get("confidence", 0) > self.confidence_threshold
+                    and result.get("confidence", 0) >= self.confidence_threshold
                 ):
                     logger.info(
                         f"Found confident answer with confidence {result['confidence']}"
