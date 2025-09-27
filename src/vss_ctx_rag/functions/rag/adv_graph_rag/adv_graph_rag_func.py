@@ -57,8 +57,9 @@ class AdvGraphRAGFunc(Function):
         self.confidence_threshold = self.get_param(
             "params", "confidence_threshold", required=False
         )
+        logger.info(f"Confidence threshold: {self.confidence_threshold}")
         self.confidence_threshold = (
-            self.confidence_threshold if self.confidence_threshold else 0.7
+            self.confidence_threshold if self.confidence_threshold is not None else 0.7
         )
         self.chat_history = []
 

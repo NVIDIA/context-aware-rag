@@ -45,8 +45,9 @@ chat:
     show_snippets: true
     snippet_length: 200
   params:
-    batch_size: 9
+    batch_size: 5
     top_k: 25
+    confidence_threshold: 0.0
   llm:
     model: nvidia/nvidia-nemotron-nano-9b-v2
     base_url: https://integrate.api.nvidia.com/v1
