@@ -549,9 +549,18 @@ class GraphExtraction:
 
             graph_documents = []
             with TimeMeasure("GraphRAG/aprocess-doc/graph-create/convert", "blue"):
-                graph_documents = await self.transformer.aconvert_to_graph_documents(
-                    combined_chunk_document_list
-                )
+                attempts = 0
+                while attempts < 3:
+                    try:
+                        graph_documents = await self.transformer.aconvert_to_graph_documents(
+                            combined_chunk_document_list
+                        )
+                        break
+                    except Exception as e:
+                        logger.error(f"Error converting to graph documents: {e}")
+                        attempts += 1
+                        if attempts == 3:
+                            raise e
             cleaned_graph_documents = self.handle_backticks_nodes_relationship_id_type(
                 graph_documents
             )
