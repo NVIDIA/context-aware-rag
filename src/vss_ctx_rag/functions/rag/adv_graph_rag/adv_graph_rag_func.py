@@ -85,10 +85,6 @@ class AdvGraphRAGFunc(Function):
                 If you cannot answer the question based on the provided context, formulate a better
                 question to fetch more relevant information.
 
-                Do NOT try to reformulate the question just because you think there are not enough
-                timestamps included! Reformulating the question will NOT result in any more
-                information, just answer the question based on the content of the context provided.
-
                 You must respond in the following JSON format:
                 {{\
                     "description": "A description of the answer",\
@@ -100,7 +96,7 @@ class AdvGraphRAGFunc(Function):
                 Example 1 (when you have enough info):
                 {{\
                     "description": "A description of the answer",\
-                    "answer": "The worker dropped a box at timestamp 78.0 and it took 39 seconds to remove it",\
+                    "answer": "an answer to the user's question based on the provided context",\
                     "updated_question": null,\
                     "confidence": 0.95\
                 }}\
@@ -109,13 +105,26 @@ class AdvGraphRAGFunc(Function):
                 {{\
                     "description": "A description of the answer",\
                     "answer": null,\
-                    "updated_question": "What events occurred between timestamp 75 and 80?",\
+                    "updated_question": "updated question to get better database results",\
                     "confidence": 0\
                 }}\
 
+                The context provided has already been filtered to the requested time range based on
+                the user's question and may only be a subset of the total time requested. That is ok,
+                you should assume that the timestamps in the context have been retrieved correctly
+                and not try to reformulate the question based on the timestamps in the context.
+
                 Only respond with valid JSON. Do not include any other text.
             """),
-            ("human", "Question: {question}\nContext: {context}\nCurrent time: {current_time}"),
+            (
+                "human", (
+                    "Question: {question}\n"
+                    "Context start time: {start_time}\n"
+                    "Context: {context}\n"
+                    "Context end time: {end_time}\n"
+                    "Current time: {current_time}\n"
+                )
+            ),
         ])
         logger.info("Initialized QA prompt template")
 
@@ -135,6 +144,8 @@ class AdvGraphRAGFunc(Function):
                 restricted to the stream_ids provided.
 
                 If the stream_ids is empty, ignore the stream_ids and just focus on the timestamps.
+
+                Please be as brief as possible in your response.
             """),
             ("human", "Question: {question}\nRetrieval strategy: {retrieval_strategy}"),
         ])
@@ -199,6 +210,8 @@ class AdvGraphRAGFunc(Function):
                     self.qa_prompt.format(
                         question=question,
                         context=context,
+                        start_time=retrieval_strategy[0],
+                        end_time=retrieval_strategy[1],
                         current_time=datetime.now(timezone.utc))
                 )
 
@@ -229,6 +242,8 @@ class AdvGraphRAGFunc(Function):
                                     self.qa_prompt.format(
                                         question=question,
                                         context=context,
+                                        start_time=retrieval_strategy[0],
+                                        end_time=retrieval_strategy[1],
                                         current_time=datetime.now(timezone.utc)
                                     )
                                 )
@@ -282,7 +297,7 @@ class AdvGraphRAGFunc(Function):
 
                 # If we need more info, try to retrieve it
                 if result.get("updated_question"):
-                    logger.info(f"Need more info: {result['updated_question']}")
+                    logger.info(f"m {result['updated_question']}")
                     new_context = []
                     for info_need in [result["updated_question"]]:
                         # Use the retriever to get additional context

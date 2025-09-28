@@ -376,9 +376,8 @@ class AdvGraphRetrieval:
         1. "only_recent" - Questions about recent events (e.g., "over the last 5 minutes...")
         2. "excluding_recent" - Questions excluding recent events (e.g., "excluding the previous hour...")
         3. "specific_start_stop" - Questions with specific time ranges (e.g., "between 5 and 20 minutes ago...")
-        4. "relative_time_past" - Questions about a specific point in the past (e.g., "what was the topic half an hour ago...")
-        5. "specific_time" - Questions about a specific clock time (e.g., "what was the topic at 10:15 PM?")
-        6. "none" - No temporal filtering needed
+        4. "specific_time" - Questions about a specific time (e.g., "what was the topic at 10:15 PM?")
+        5. "none" - No temporal filtering needed
 
         Example question: "Over the last 5 minutes, what topics were discussed?"
         Example response:
@@ -386,19 +385,19 @@ class AdvGraphRetrieval:
             "temporal_strategy": "only_recent"\
         }}\
 
-        Example question: "Between 10 and 20 minutes ago, what happened?"
+        Example question: "Summarize the main topics prior to 2:30 PM"
+        Example response:
+        {{\
+            "temporal_strategy": "excluding_recent"\
+        }}\
+
+        Example question: "Between 10 minutes ago and 2:30 PM, what happened?"
         Example response:
         {{\
             "temporal_strategy": "specific_start_stop"\
         }}\
 
         Example question: "What was being discussed half an hour ago?"
-        Example response:
-        {{\
-            "temporal_strategy": "relative_time_past"\
-        }}\
-
-        Example question: "What was the topic at 2:30 PM?"
         Example response:
         {{\
             "temporal_strategy": "specific_time"\
@@ -411,60 +410,73 @@ class AdvGraphRetrieval:
         logger.info("Temporal strategy analysis complete")
         return remove_think_tags(response.content)
 
-    async def analyze_temporal_times(self, question: str, temporal_strategy: str) -> Dict[str, Any]:
-        """Analyze question to determine specific start and stop times based on temporal strategy"""
-        logger.info(f"Analyzing temporal times for question: {question}, strategy: {temporal_strategy}")
+    async def analyze_temporal_times(self, query: str, temporal_strategy: str) -> Dict[str, Any]:
+        """Analyze query to determine specific start and stop times based on temporal strategy"""
+        logger.info(f"Analyzing temporal times for query: {query}, strategy: {temporal_strategy}")
 
         if temporal_strategy == "none":
             return {"start_time": None, "end_time": None}
 
         # Strategy-specific prompt templates
+        ampm_instruction = (
+            "If a specific (non-relative) time is specified, the timestamp should be in the format HH:MM:SS. "
+            "If AM/PM is specified, you should convert the time to be in 24-hour format and indicate that AM/PM was specified. "
+            "If AM/PM is not specified, you should return the time as-is with HH:MM:SS format and indicate that AM/PM was not specified. "
+            "Examples:\n"
+            '- "at 2:30 PM" → {"timestamp": "14:30:00", "relative_time": false, "am_pm_specified": true}\n'
+            '- "since 9 o\'clock" → {"timestamp": "09:00:00", "relative_time": false, "am_pm_specified": false}\n'
+            '- "noon" → {"timestamp": "12:00:00", "relative_time": false, "am_pm_specified": true}'
+        )
         strategy_prompts = {
             "only_recent": {
-                "instruction": "Return how many seconds back to look from now.",
-                "format": '{"seconds_back": 300}  // for "last 5 minutes"',
+                "instruction": f"Return how many seconds back to look from now. {ampm_instruction}",
+                "format": '{"timestamp": 300, "relative_time": true, "am_pm_specified": false}  // for "last 5 minutes"',
                 "examples": [
-                    '"last 10 minutes" → {"seconds_back": 600}',
-                    '"over the past hour" → {"seconds_back": 3600}',
-                    '"in the previous 30 seconds" → {"seconds_back": 30}'
+                    '"last 10 minutes" → {"timestamp": 600, "relative_time": true, "am_pm_specified": false}',
+                    '"over the past hour" → {"timestamp": 3600, "relative_time": true, "am_pm_specified": false}',
+                    '"in the previous 30 seconds" → {"timestamp": 30, "relative_time": true, "am_pm_specified": false}',
+                    '"at 2:30 PM" → {"timestamp": "14:30:00", "relative_time": false, "am_pm_specified": true}',
+                    '"since 9 o\'clock" → {"timestamp": "09:00:00", "relative_time": false, "am_pm_specified": false}',
                 ]
             },
             "excluding_recent": {
-                "instruction": "Return how many seconds to exclude from recent time.",
-                "format": '{"seconds_to_exclude": 3600}  // for "excluding the previous hour"',
+                "instruction": f"Return how many seconds to exclude from recent time. {ampm_instruction}",
+                "format": '{"timestamp": 3600, "relative_time": true, "am_pm_specified": false}  // for "excluding the previous hour"',
                 "examples": [
-                    '"excluding the last 5 minutes" → {"seconds_to_exclude": 300}',
-                    '"not including the past hour" → {"seconds_to_exclude": 3600}',
-                    '"ignoring the previous 2 minutes" → {"seconds_to_exclude": 120}'
+                    '"excluding the last 5 minutes" → {"timestamp": 300, "relative_time": true, "am_pm_specified": false}',
+                    '"not including the past hour" → {"timestamp": 3600, "relative_time": true, "am_pm_specified": false}',
+                    '"ignoring the previous 2 minutes" → {"timestamp": 120, "relative_time": true, "am_pm_specified": false}',
+                    '"prior to 7:30 PM" → {"timestamp": "19:30:00", "relative_time": false, "am_pm_specified": true}',
+                    '"before 10:00" → {"timestamp": "10:00:00", "relative_time": false, "am_pm_specified": false}',
                 ]
             },
             "specific_start_stop": {
-                "instruction": "Return start and stop times in seconds from now (start_seconds_ago should be larger than end_seconds_ago).",
-                "format": '{"start_seconds_ago": 1200, "end_seconds_ago": 300}  // 20 minutes ago to 5 minutes ago',
+                "instruction": f"Return start and stop times in seconds from now (start_seconds_ago should be larger than end_seconds_ago). {ampm_instruction}",
+                "format": (
+                    '{'
+                    '"start": {"timestamp": 1200, "relative_time": true, "am_pm_specified": false}, '
+                    '"end": {"timestamp": "12:00:00", "relative_time": false, "am_pm_specified": true}'
+                    '} // 20 minutes ago to noon'
+                ),
                 "examples": [
-                    '"between 5 and 15 minutes ago" → {"start_seconds_ago": 900, "end_seconds_ago": 300}',
-                    '"from 1 hour to 30 minutes ago" → {"start_seconds_ago": 3600, "end_seconds_ago": 1800}',
-                    '"between 2 and 10 minutes ago" → {"start_seconds_ago": 600, "end_seconds_ago": 120}'
-                ]
-            },
-            "relative_time_past": {
-                "instruction": "Return the past point in seconds and optional window size (default 300 seconds if not specified).",
-                "format": '{"past_point_seconds_ago": 1800, "window_seconds": 300}  // 30 minutes ago with 5 minute window',
-                "examples": [
-                    '"half an hour ago" → {"past_point_seconds_ago": 1800, "window_seconds": 300}',
-                    '"what happened 10 minutes ago" → {"past_point_seconds_ago": 600, "window_seconds": 300}',
-                    '"around 2 hours ago, with a 10 minute window" → {"past_point_seconds_ago": 7200, "window_seconds": 600}'
+                    '"between 5 and 15 minutes ago" → {"start": {"timestamp": 900, "relative_time": true, "am_pm_specified": false}, "end": {"timestamp": 300, "relative_time": true, "am_pm_specified": false}}',
+                    '"from 1 hour to 30 minutes ago" → {"start": {"timestamp": 3600, "relative_time": true, "am_pm_specified": false}, "end": {"timestamp": 1800, "relative_time": true, "am_pm_specified": false}}',
+                    '"between 2 minutes ago and 2:30" → {"start": {"timestamp": "02:30:00", "relative_time": false, "am_pm_specified": false}, "end": {"timestamp": 120, "relative_time": true, "am_pm_specified": false}}',
+                    '"between noon and 2:30" → {"start": {"timestamp": "12:00:00", "relative_time": false, "am_pm_specified": true}, "end": {"timestamp": "02:30:00", "relative_time": false, "am_pm_specified": false}}',
+                    '"between 5:30 and 7:30 PM" → {"start": {"timestamp": "17:30:00", "relative_time": false, "am_pm_specified": true}, "end": {"timestamp": "19:30:00", "relative_time": false, "am_pm_specified": true}}',
                 ]
             },
             "specific_time": {
-                "instruction": "Return the specific time. If AM/PM was specified, convert to HH:MM:SS format (24-hour format). If AM/PM was NOT specified, preserve the original time format and indicate AM/PM was not specified. Also include window if specified (default 300 seconds if not specified).",
-                "format": '{"specific_time": "14:30:00", "am_pm_specified": true, "window_seconds": 300}  // for "2:30 PM"',
+                "instruction": f"Return the past point in time and optional window size (default 300 seconds if not specified). {ampm_instruction}",
+                "format": '{"timestamp": "14:30:00", "relative_time": false, "am_pm_specified": true, "window_seconds": 300}  // for "2:30 PM"',
                 "examples": [
-                    '"at 3:15 PM" → {"specific_time": "15:15:00", "am_pm_specified": true}',
-                    '"around 10:30 AM, plus/minus 10 minutes" → {"specific_time": "10:30:00", "am_pm_specified": true, "window_seconds": 600}',
-                    '"at 9 o\'clock" → {"specific_time": "09:00:00", "am_pm_specified": false}',
-                    '"at 2:45" → {"specific_time": "02:45:00", "am_pm_specified": false}',
-                    '"around 11:30" → {"specific_time": "11:30:00", "am_pm_specified": false}'
+                    '"half an hour ago" → {"timestamp": 1800, "relative_time": true, "am_pm_specified": false, "window_seconds": 300}',
+                    '"what happened 10 minutes ago" → {"timestamp": 600, "relative_time": true, "am_pm_specified": false, "window_seconds": 300}',
+                    '"at 3:15 PM" → {"timestamp": "15:15:00", "relative_time": false, "am_pm_specified": true, "window_seconds": 300}',
+                    '"around 10:30 AM, plus/minus 10 minutes" → {"timestamp": "10:30:00", "relative_time": false, "am_pm_specified": true, "window_seconds": 600}',
+                    '"at 9 o\'clock" → {"timestamp": "09:00:00", "relative_time": false, "am_pm_specified": false, "window_seconds": 300}',
+                    '"at 2:45" → {"timestamp": "02:45:00", "relative_time": false, "am_pm_specified": false, "window_seconds": 300}',
+                    '"around a 15-minute window near 11:30" → {"timestamp": "11:30:00", "relative_time": false, "am_pm_specified": false, "window_seconds": 900}'
                 ]
             }
         }
@@ -475,8 +487,8 @@ class AdvGraphRetrieval:
 
         strategy_config = strategy_prompts[temporal_strategy]
 
-        prompt = f"""Analyze this question to extract specific time values for the "{temporal_strategy}" temporal strategy.
-        Question: {question}
+        prompt = f"""Analyze this user query to extract specific time values for the "{temporal_strategy}" temporal strategy.
+        User Query: {query}
         Temporal Strategy: {temporal_strategy}
 
         Task: {strategy_config["instruction"]}
@@ -492,11 +504,79 @@ class AdvGraphRetrieval:
 
         response = await self.chat_llm.ainvoke(prompt)
         logger.info("Temporal times analysis complete")
+        logger.info(f"Temporal times analysis response: {response.content}")
         return remove_think_tags(response.content)
+
+    def _convert_specific_time_to_timestamp(
+        self,
+        specific_time: str,
+        am_pm_specified: bool = False,
+        now: datetime = None,
+    ) -> float:
+        """Convert a specific time string to a timestamp"""
+        # Parse the time string (HH:MM:SS format)
+        time_obj = datetime.strptime(specific_time, "%H:%M:%S").time()
+        if now is None:
+            now = datetime.now(timezone.utc)
+
+        if am_pm_specified:
+            # AM/PM was specified, so the time is already correct in 24-hour format
+            # Just need to determine if it's today or yesterday
+            target_datetime = datetime.combine(now.date(), time_obj, timezone.utc)
+
+            # If the target time is in the future today, use yesterday
+            if target_datetime > now:
+                target_datetime = datetime.combine(now.date() - timedelta(days=1), time_obj, timezone.utc)
+                logger.info(f"Specific time {specific_time} (AM/PM specified) was in the future today, using yesterday")
+        else:
+            # AM/PM was NOT specified, use AM if PM is in the future (today) and PM otherwise
+            # Create PM version using timedelta
+            pm_time_today = datetime.combine(now.date(), time_obj, timezone.utc)
+            if time_obj.hour < 12:
+                pm_time_today += timedelta(hours=12)
+
+            if pm_time_today > now:
+                # PM is in the future today, so use AM
+                am_time_today = datetime.combine(now.date(), time_obj, timezone.utc)
+                if am_time_today > now:
+                    # AM is also in future today, use PM yesterday
+                    logger.info(f"Specific time {specific_time} (no AM/PM): PM in future, using PM yesterday")
+                    target_datetime = pm_time_today - timedelta(days=1)
+                else:
+                    # AM is in past today, use it
+                    logger.info(f"Specific time {specific_time} (no AM/PM): PM in future, using AM today")
+                    target_datetime = am_time_today
+            else:
+                # PM is in past today, so use PM
+                logger.info(f"Specific time {specific_time} (no AM/PM): PM in past, using PM today")
+                target_datetime = pm_time_today
+
+        return target_datetime
+
+    def _get_relative_timestamp(self, analysis_dict: dict, now: datetime = None) -> int:
+        """Get relative time seconds from analysis dictionary
+
+        Args:
+            analysis_dict (dict): The analysis dictionary containing the relative time seconds.
+                Expects "timestamp", "relative_time", and "am_pm_specified" keys.
+
+        Returns:
+            int: The relative time seconds
+        """
+        if analysis_dict["relative_time"]:
+            offset = now.timestamp() - analysis_dict["timestamp"]
+        else:
+            am_pm_specified = analysis_dict.get("am_pm_specified", False)
+            offset = self._convert_specific_time_to_timestamp(
+                analysis_dict["timestamp"],
+                am_pm_specified,
+                now=now
+            ).timestamp()
+        return offset
 
     def _convert_temporal_times_to_timestamps(self, temporal_times: Dict, temporal_strategy: str) -> Dict[str, float]:
         """Convert temporal analysis results to actual start/end timestamps"""
-        tnow = datetime.now(timezone.utc).timestamp()
+        now = datetime.now(timezone.utc)
 
         try:
             if temporal_strategy == "none":
@@ -504,78 +584,37 @@ class AdvGraphRetrieval:
 
             elif temporal_strategy == "only_recent":
                 return {
-                    "start_time": tnow - temporal_times["seconds_back"],
+                    "start_time": self._get_relative_timestamp(temporal_times, now),
                     "end_time": None
                 }
 
             elif temporal_strategy == "excluding_recent":
                 return {
                     "start_time": None,
-                    "end_time": tnow - temporal_times["seconds_to_exclude"]
+                    "end_time": self._get_relative_timestamp(temporal_times, now)
                 }
 
             elif temporal_strategy == "specific_start_stop":
-                return {
-                    "start_time": tnow - temporal_times["start_seconds_ago"],
-                    "end_time": tnow - temporal_times["end_seconds_ago"]
-                }
+                start_offset = self._get_relative_timestamp(temporal_times["start"], now)
+                end_offset = self._get_relative_timestamp(temporal_times["end"], now)
+                if start_offset > end_offset:
+                    start_offset, end_offset = end_offset, start_offset
 
-            elif temporal_strategy == "relative_time_past":
-                window_seconds = temporal_times.get("window_seconds", 300)  # Default 5 min window
                 return {
-                    "start_time": tnow - temporal_times["past_point_seconds_ago"] - (window_seconds / 2),
-                    "end_time": tnow - temporal_times["past_point_seconds_ago"] + (window_seconds / 2)
+                    "start_time": start_offset,
+                    "end_time": end_offset
                 }
 
             elif temporal_strategy == "specific_time":
-                # Parse the specific time and calculate seconds ago from current time
-                specific_time = temporal_times["specific_time"]
+                time_offset = self._get_relative_timestamp(temporal_times, now)
                 window_seconds = temporal_times.get("window_seconds", 300)  # Default 5 min window
-                am_pm_specified = temporal_times.get("am_pm_specified", False)
-
-                # Parse the time string (HH:MM:SS format)
-                time_obj = datetime.strptime(specific_time, "%H:%M:%S").time()
-                now = datetime.now(timezone.utc)
-
-                if am_pm_specified:
-                    # AM/PM was specified, so the time is already correct in 24-hour format
-                    # Just need to determine if it's today or yesterday
-                    target_datetime = datetime.combine(now.date(), time_obj, timezone.utc)
-
-                    # If the target time is in the future today, use yesterday
-                    if target_datetime > now:
-                        target_datetime = datetime.combine(now.date() - timedelta(days=1), time_obj, timezone.utc)
-                        logger.info(f"Specific time {specific_time} (AM/PM specified) was in the future today, using yesterday")
-                else:
-                    # AM/PM was NOT specified, use AM if PM is in the future (today) and PM otherwise
-                    # Create PM version using timedelta
-                    pm_time_today = datetime.combine(now.date(), time_obj, timezone.utc)
-                    if time_obj.hour < 12:
-                        pm_time_today += timedelta(hours=12)
-
-                    if pm_time_today > now:
-                        # PM is in the future today, so use AM
-                        am_time_today = datetime.combine(now.date(), time_obj, timezone.utc)
-                        if am_time_today > now:
-                            # AM is also in future today, use PM yesterday
-                            target_datetime = pm_time_today - timedelta(days=1)
-                            logger.info(f"Specific time {specific_time} (no AM/PM): PM in future, using PM yesterday")
-                        else:
-                            # AM is in past today, use it
-                            target_datetime = am_time_today
-                            logger.info(f"Specific time {specific_time} (no AM/PM): PM in future, using AM today")
-                    else:
-                        # PM is in past today, so use PM
-                        target_datetime = pm_time_today
-                        logger.info(f"Specific time {specific_time} (no AM/PM): PM in past, using PM today")
-
-                past_point_seconds_ago = (now - target_datetime).total_seconds()
-                logger.info(f"Specific time {specific_time} was {past_point_seconds_ago} seconds ago")
-
                 return {
-                    "start_time": tnow - past_point_seconds_ago - (window_seconds / 2),
-                    "end_time": tnow - past_point_seconds_ago + (window_seconds / 2)
+                    "start_time": time_offset - (window_seconds / 2),
+                    "end_time": time_offset + (window_seconds / 2)
                 }
+
+            else:
+                raise ValueError(f"Invalid temporal strategy: {temporal_strategy}")
 
         except Exception as e:
             logger.error(f"Error converting temporal times to timestamps: {e}")
@@ -583,6 +622,13 @@ class AdvGraphRetrieval:
 
         # Fallback
         return {"start_time": None, "end_time": None}
+
+    def _format_start_end_times(self, start_time: float, end_time: float) -> tuple[str, str]:
+        """Format start and end times into a string"""
+        return (
+            datetime.utcfromtimestamp(start_time).strftime("%D %H:%M:%S") if start_time else "Now",
+            datetime.utcfromtimestamp(end_time).strftime("%D %H:%M:%S") if end_time else "Max History",
+        )
 
     async def retrieve_relevant_context(self, question: str) -> List[Document]:
         """Main retrieval method that orchestrates different retrieval strategies using 3-step analysis"""
@@ -643,11 +689,9 @@ class AdvGraphRetrieval:
                     logger.info(f"Retrieved {len(temporal_data)} temporal records")
                 else:
                     logger.info("No temporal data found in that time range")
-                    return None, (
-                        datetime.utcfromtimestamp(start_time).strftime("%D %H:%M:%S") if start_time else "now",
-                        datetime.utcfromtimestamp(end_time).strftime("%D %H:%M:%S") if end_time else "max",
-                        stream_ids
-                    )
+                    start_str, end_str = self._format_start_end_times(start_time, end_time)
+                    return None, (start_str, end_str, stream_ids)
+
             else:  # semantic retrieval
                 # Semantic similarity retrieval
                 semantic_data = await self.retrieve_semantic_context(
@@ -702,7 +746,8 @@ class AdvGraphRetrieval:
                         documents.append(doc)
 
             logger.info(f"Returning {len(documents)} documents")
-            return documents, None
+            start_str, end_str = self._format_start_end_times(start_time, end_time)
+            return documents, (start_str, end_str, stream_ids)
 
     async def _parse_json_with_retries(self, analysis_func, analysis_type: str, *args, **kwargs) -> Dict:
         """Helper method to retry analysis function calls and parse JSON responses"""
