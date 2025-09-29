@@ -47,7 +47,6 @@ services:
       - standalone
       - neo4j
       - otel_collector
-      - jaeger
       - prometheus
       - cassandra
     container_name: vss-ctx-rag-retriever
@@ -75,7 +74,6 @@ services:
       - standalone
       - neo4j
       - otel_collector
-      - jaeger
       - prometheus
       - cassandra
     container_name: vss-ctx-rag-data-ingestion
