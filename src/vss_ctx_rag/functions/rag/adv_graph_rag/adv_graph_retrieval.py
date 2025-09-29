@@ -379,25 +379,33 @@ class AdvGraphRetrieval:
         4. "specific_time" - Questions about a specific time (e.g., "what was the topic at 10:15 PM?")
         5. "none" - No temporal filtering needed
 
-        Example question: "Over the last 5 minutes, what topics were discussed?"
+        Example questions:
+        - "Over the last 5 minutes, what topics were discussed?"
+        - "Since 4:00 PM, what have you heard about AI?"
         Example response:
         {{\
             "temporal_strategy": "only_recent"\
         }}\
 
-        Example question: "Summarize the main topics prior to 2:30 PM"
+        Example question:
+        - "Summarize the main topics prior to 2:30 PM"
+        - "Prior to 10 minutes ago, what have you heard about AI?"
         Example response:
         {{\
             "temporal_strategy": "excluding_recent"\
         }}\
 
-        Example question: "Between 10 minutes ago and 2:30 PM, what happened?"
+        Example question:
+        - "Between 10 minutes ago and 2:30 PM, what happened?"
+        - "Between 5 and 6 o'clock, what have you heard about AI?"
         Example response:
         {{\
             "temporal_strategy": "specific_start_stop"\
         }}\
 
-        Example question: "What was being discussed half an hour ago?"
+        Example question:
+        - "What was being discussed half an hour ago?"
+        - "What was being discussed at 2:30 PM? Use a 1 hour window."
         Example response:
         {{\
             "temporal_strategy": "specific_time"\
