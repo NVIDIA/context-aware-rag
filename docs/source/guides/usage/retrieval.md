@@ -28,7 +28,7 @@ Queries can be made to the system using the `/chat/completions` endpoint of the 
 ```json
 {
   "model": "meta/llama-3.1-70b-instruct",
-  "base_url": "https://integrate.api.nvidia.com/v1",
+  "base_url": "https://integrate.api.nvidia.com/v1", // optional
   "messages": [{"role": "user", "content": "Your question here"}],
   "uuid": "unique-request-id"
 }
@@ -44,7 +44,6 @@ url = "http://localhost:8000/chat/completions"
 headers = {"Content-Type": "application/json"}
 chat_data = {
     "model": "meta/llama-3.1-70b-instruct",
-    "base_url": "https://integrate.api.nvidia.com/v1",
     "messages": [{"role": "user", "content": "Who mentioned the fire?"}],
     "uuid": "your_session_uuid"
 }
@@ -56,7 +55,7 @@ print(response.json()["choices"][0]["message"]["content"])
 ### Query Parameters
 
 - `model`: The model to use for the completion (e.g., "meta/llama-3.1-70b-instruct")
-- `base_url`: The base URL for the API (e.g., "https://integrate.api.nvidia.com/v1")
+- `base_url`: (optional) The base URL for the API (e.g., "https://integrate.api.nvidia.com/v1)
 - `messages`: Array of message objects with `role` and `content` fields
 - `uuid`: Unique identifier for the request
 

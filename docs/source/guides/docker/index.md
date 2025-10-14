@@ -16,15 +16,16 @@ limitations under the License.
 -->
 # Deployment
 
-This section contains guides for running and managing the VIA CTX RAG system
+This section contains guides for running and managing the Context Aware RAG system
 
 ## Available Guides
 
 - [Docker Compose](compose.md) - Instructions for running the complete system using Docker Compose
+- [Helm Chart](helm.md) - Instructions for running the complete system using Helm Chart
 
 ## Overview
 
-The VIA CTX RAG system uses Docker to containerize its components, making it easy to deploy and manage the following services:
+The Context Aware RAG system uses Docker to containerize its components, making it easy to deploy and manage the following services:
 
 - Database of choice like Neo4j, Milvus, Arango etc.
 - Data Ingestion Service: For processing and storing data
@@ -38,5 +39,6 @@ Choose the appropriate guide based on your deployment needs:
 :maxdepth: 2
 
 Docker Compose <./compose.md>
+Helm Chart <./helm.md>
 
 ```

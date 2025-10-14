@@ -108,6 +108,8 @@ async def call_token_safe(input_data, pipeline, retries_left):
     except Exception as e:
         if (
             "exceeds maximum input length" not in str(e).lower()
+            and "maximum context length" not in str(e).lower()
+            and "please reduce the length of the input messages" not in str(e).lower()
             and "please reduce the length of the messages" not in str(e).lower()
             and "max_tokens must be at least 1, got" not in str(e).lower()
         ):

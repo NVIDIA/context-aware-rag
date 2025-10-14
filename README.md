@@ -296,7 +296,6 @@ response = requests.post(
 
 chat_data = {
     "model": "meta/llama-3.1-70b-instruct",
-    "base_url": "https://integrate.api.nvidia.com/v1",
     "messages": [{"role": "user", "content": "Who mentioned the fire?"}],
     "uuid": "1"
 }

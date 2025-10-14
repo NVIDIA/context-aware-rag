@@ -77,7 +77,7 @@ openai_llm:
   - `model` (str): Embedding model identifier to use.
   - `base_url` (str): Endpoint for the embeddings service.
   - `api_key` (str): API key used to authenticate embedding calls.
-  - `truncate` (str): How to truncate long inputs (e.g., `END`).
+  - `truncate` (str): How to truncate long inputs (e.g., `END`). Default: `END`
 - Example:
 ```yaml
 nvidia_embedding:
@@ -113,9 +113,7 @@ nvidia_reranker:
   - `port` (str|int): Neo4j Bolt port.
   - `username` (str): Neo4j username.
   - `password` (str): Neo4j password.
-  - `collection_name` (str): Logical namespace/prefix for graph data.
-  - `traversal_strategy` (str): Strategy for traversals (e.g., `chunk`).
-  - `embedding_parallel_count` (int): Max parallelism for embedding tasks.
+  - `embedding_parallel_count` (int): Max parallelism for embedding tasks. Default: 1000.
 - Example:
 ```yaml
 graph_db:
@@ -137,10 +135,8 @@ graph_db:
   - `port` (str|int): ArangoDB port.
   - `username` (str): ArangoDB username.
   - `password` (str): ArangoDB password.
-  - `collection_name` (str): Base name used to derive vertex/edge collections.
-  - `write_batch_size` (int): Number of records per bulk write.
-  - `multi_channel` (bool): When true, maps all streams to `default` namespace.
-  - `traversal_strategy` (str): Strategy for graph traversals.
+  - `collection_name` (str): Base name used to derive vertex/edge collections. Default: 'default_<uuid>'
+  - `multi_channel` (bool, optional): Query across multiple streams if true. Default: False.
 - Example:
 ```yaml
 graph_db_arango:
@@ -160,9 +156,9 @@ graph_db_arango:
 - Parameters (src/vss_ctx_rag/tools/storage/milvus_db.py:34 and DB base):
   - `host` (str): Milvus/Attu host.
   - `port` (str|int): Milvus gRPC/HTTP port (config dependent).
-  - `collection_name` (str): Default collection/index name to use.
-  - `user_specified_collection_name` (str): Override active collection at runtime.
-  - `custom_metadata` (dict): Additional key/values appended to stored docs.
+  - `collection_name` (str): Default collection/index name to use. Default: 'default_<uuid>'
+  - `user_specified_collection_name` (str): Override active collection at runtime. Default: None.
+  - `custom_metadata` (dict): Additional key/values appended to stored docs. Default: {}.
 - Example:
 ```yaml
 vector_db:
@@ -180,7 +176,7 @@ vector_db:
 - Parameters (src/vss_ctx_rag/tools/storage/elasticsearch_db.py:31 and DB base):
   - `host` (str): Elasticsearch host/IP.
   - `port` (str|int): Elasticsearch port.
-  - `collection_name` (str): Index name to create/use.
+  - `collection_name` (str): Collection to create/use. Default: 'default_<uuid>'
 - Example:
 ```yaml
 elasticsearch_db:
@@ -283,15 +279,14 @@ Tools required:
 - `llm`: The LLM used to synthesize the summary.
 
 Parameters:
-- `batch_size` (int): Required. Number of documents per summarization batch. Default: 6.
+- `batch_size` (int): Required. Number of documents per summarization batch. Default: 1.
 - `batch_max_concurrency` (int): Required. Max concurrent batch jobs when summarizing. Default: 20.
 - `top_k` (int): Optional. Number of items to consider during summarization steps. Default: 5.
 - `prompts.caption` (str): Required. Dense captioning prompt (used in some pipelines).
 - `prompts.caption_summarization` (str): Required. Prompt to summarize a batch of captions.
 - `prompts.summary_aggregation` (str): Required. Prompt to merge batch summaries into a final summary.
 - `is_live` (bool): Optional. True if input is a live stream (affects time handling). Default: False.
-- `summary_duration` (int): Optional. Target duration of summary in seconds. Default: None.
-- `chunk_size` (int): Optional. Chunk size hint for splitting before summarizing. Default: None.
+- `chunk_size` (int): Optional. Chunk size hint for splitting before summarizing. Default: 500.
 - `uuid` (str): Optional. Logical namespace for the data stream. Default: "default".
 - `timeout_sec` (int): Optional. Per‑batch call timeout in seconds. Default: 120.
 - `summ_rec_lim` (int): Optional. Max recursion retries for token‑safe summarization. Default: 8.
@@ -307,12 +302,12 @@ Some available options for `ingestion_function.type` are:
 
 ```yaml
 ingestion_function:
-   type: graph_ingestion
-   params:
-   batch_size: 1
-   tools:
-   llm: nvidia_llm
-   db: graph_db
+  type: graph_ingestion
+  params:
+    batch_size: 1
+  tools:
+    llm: nvidia_llm
+    db: graph_db
 ```
 
 Function variants and their tools/params:
@@ -320,33 +315,31 @@ Function variants and their tools/params:
 - `graph_ingestion` (src/vss_ctx_rag/functions/rag/graph_rag/ingestion/graph_ingestion.py)
   - Tools: `db` = `neo4j` or `arango`; `llm` = any `llm`.
   - Parameters:
-    - `batch_size` (int): Number of docs processed before graph writes.
-    - `multi_channel` (bool): Enable multi‑stream layout (namespacing behavior).
+    - `batch_size` (int): Number of docs processed before graph writes. Default: 1.
+    - `multi_channel` (bool, optional): Query across multiple streams if true. Default: False.
     - `uuid` (str): Stream namespace identifier.
-    - `embedding_parallel_count` (int): Parallel workers for embeddings.
-    - `duplicate_score_value` (float): Score threshold for node deduplication.
-    - `node_types` (str): Comma‑separated node labels to include.
-    - `relationship_types` (str): Comma‑separated relationship types to include.
-    - `deduplicate_nodes` (bool): Merge similar nodes if true.
-    - `disable_entity_description` (bool): Skip generating entity descriptions.
-    - `disable_entity_extraction` (bool): Skip entity extraction entirely.
-    - `chunk_size` (int): Text chunk size for splitting during ingestion.
-    - `chunk_overlap` (int): Overlap between chunks for splitting.
+    - `embedding_parallel_count` (int, Optional): Parallel workers for embeddings. Default: 1000.
+    - `duplicate_score_value` (float, Optional): Score threshold for node deduplication. Default: 0.9.
+    - `node_types` (list[str], Optional): Node labels to include. Default: ["Person", "Vehicle", "Location", "Object"]
+    - `relationship_types` (list[str], Optional): Relationship types to include. Default: []
+    - `deduplicate_nodes` (bool, Optional): Merge similar nodes if true. Default: False.
+    - `disable_entity_description` (bool, Optional): Skip generating entity descriptions. Default: True.
+    - `disable_entity_extraction` (bool, Optional): Skip entity extraction entirely. Default: False.
+    - `chunk_size` (int, Optional): Text chunk size for splitting during ingestion. Default: 500.
+    - `chunk_overlap` (int, Optional): Overlap between chunks for splitting. Default: 10.
 
 - `vector_ingestion` (src/vss_ctx_rag/functions/rag/vector_rag/vector_ingestion_func.py:30)
   - Tools: `db` = `milvus` or `elasticsearch` (no LLM required).
   - Parameters:
-    - `batch_size` (int): Number of docs processed in a run (metadata grouping).
-    - `multi_channel` (bool): Enable multi‑stream handling.
+    - `batch_size` (int): Number of docs processed in a run (metadata grouping). Default: 1.
+    - `multi_channel` (bool, optional): Query across multiple streams if true. Default: False.
     - `uuid` (str): Stream namespace identifier.
-    - `custom_metadata` (dict): Extra metadata to attach to stored docs.
-    - `is_user_specified_collection` (bool): Use a user‑provided collection.
 
 - `foundation_ingestion` (src/vss_ctx_rag/functions/rag/foundation_rag/foundation_ingestion_func.py:31)
   - Tools: `db` = `milvus`.
   - Parameters:
-    - `batch_size` (int): Number of docs processed in a run (metadata grouping).
-    - `multi_channel` (bool): Enable multi‑stream handling.
+    - `batch_size` (int): Number of docs processed in a run (metadata grouping). Default: 1.
+    - `multi_channel` (bool, optional): Query across multiple streams if true. Default: False.
     - `uuid` (str): Stream namespace identifier.
 
 #### Retrieval
@@ -361,21 +354,17 @@ The table below documents each supported retrieval function type, its purpose, r
 - Purpose: Basic graph-based retrieval using Neo4j or ArangoDB for semantic search over knowledge graphs.
 - Required Tools: `llm`, `db` (neo4j or arango).
 - Parameters (src/vss_ctx_rag/functions/rag/graph_rag/retrieval/graph_retrieval.py:41):
-  - `top_k` (int): Number of chunks/entities to retrieve. Default: 10.
-  - `chat_history` (bool, optional): Keep and summarize multi-turn chat history. Default: false.
-  - `multi_channel` (bool, optional): Query across multiple streams if true. Default: false.
+  - `top_k` (int): Number of chunks/entities to retrieve. Default: 5.
+  - `chat_history` (bool, optional): Keep and summarize multi-turn chat history. Default: False.
+  - `multi_channel` (bool, optional): Query across multiple streams if true. Default: False.
   - `uuid` (str, optional): Stream namespace identifier. Default: "default".
-  - `image` (bool, optional): Attach extracted frames to the prompt where supported. Default: false.
-  - `num_chunks` (int, optional): For image extraction, number of chunks to sample.
-  - `num_frames_per_chunk` (int, optional): Frames per chunk to sample.
-  - `max_total_images` (int, optional): Cap on total extracted images.
 - Example:
 ```yaml
 retriever_function:
   type: graph_retrieval
   params:
     image: false
-    top_k: 10
+    top_k: 5
   tools:
     llm: nvidia_llm
     db: graph_db
@@ -394,13 +383,12 @@ retriever_function:
     - `bfs`: Breadth-first search traversal to find nodes one hop away.
     - `next_chunk`: Navigate to the next chunk in video.
   - `uuid` (str, optional): Stream namespace identifier. Default: "default".
-  - `multi_channel` (bool, optional): Query across multiple streams if true. Default: false.
+  - `multi_channel` (bool, optional): Query across multiple streams if true. Default: False.
   - `multi_choice` (bool, optional): Enable multiple choice mode for planner prompts.
-  - `max_iterations` (int, optional): Recursion limit for agent reasoning.
-  - `image` (bool, optional): Attach extracted frames to the prompt where supported.
-  - `num_frames_per_chunk` (int, optional): Frames per chunk to sample for VLM.
-  - `num_chunks` (int, optional): For image extraction, number of chunks to sample.
-  - `max_total_images` (int, optional): Cap on total extracted images.
+  - `max_iterations` (int, optional): Recursion limit for agent reasoning. Default: 20
+  - `num_frames_per_chunk` (int, optional): Frames per chunk to sample for VLM. Default: 3.
+  - `num_chunks` (int, optional): For image extraction, number of chunks to sample. Default: 3.
+  - `max_total_images` (int, optional): Cap on total extracted images. Default: 10.
   - `prompt_config_path` (str, optional): Prompt configuration section below.
 
 - Example:
@@ -611,13 +599,17 @@ Example prompt configuration file:
 - Purpose: Advanced CoT-style retrieval with reasoning capabilities over graph structures.
 - Required Tools: `llm`, `db` (neo4j), `vlm`.
 - Parameters (src/vss_ctx_rag/functions/rag/graph_rag/retrieval/adv_graph_retrieval.py:52):
-  - `top_k` (int): Number of chunks/entities to retrieve. Default: 10.
+  - `top_k` (int): Number of chunks/entities to retrieve. Default: 5.
   - `batch_size` (int, optional): Processing batch size. Default: 1.
-  - `image` (bool, optional): Attach extracted frames to the prompt where supported. Default: false.
-  - `chat_history` (bool, optional): Keep and summarize multi-turn chat history.
-  - `multi_channel` (bool, optional): Query across multiple streams if true.
+  - `image` (bool, optional): Attach extracted frames to the prompt where supported. Default: False.
+  - `chat_history` (bool, optional): Keep and summarize multi-turn chat history. Default: False.
+  - `multi_channel` (bool, optional): Query across multiple streams if true. Default: False.
   - `uuid` (str, optional): Stream namespace identifier.
   - `prompt_config_path` (str, optional): Prompt configuration section below.
+  - `max_iterations` (int, optional): Recursion limit for agent reasoning. Default: 3.
+  - `num_frames_per_chunk` (int, optional): Frames per chunk to sample for VLM. Default: 3.
+  - `num_chunks` (int, optional): For image extraction, number of chunks to sample. Default: 3.
+  - `max_total_images` (int, optional): Cap on total extracted images. Default: 10.
 - Example:
 ```yaml
 retriever_function:
@@ -631,7 +623,6 @@ retriever_function:
   tools:
     llm: nvidia_llm
     db: graph_db
-    vlm: openai_llm
 ```
 **Prompt Configuration:**
 
@@ -815,11 +806,8 @@ Example prompt configuration file:
 - Optional Tools: `reranker`.
 - Parameters (src/vss_ctx_rag/functions/rag/vector_rag/vector_retrieval_func.py:52):
   - `top_k` (int): Number of documents to retrieve semantically. Default: 10.
-  - `multi_channel` (bool, optional): Query across multiple streams if true.
+  - `multi_channel` (bool, optional): Query across multiple streams if true. Default: False.
   - `uuid` (str, optional): Stream namespace identifier.
-  - `image` (bool, optional): Attach extracted frames to the prompt where supported.
-  - `custom_metadata` (dict, optional): Additional metadata for filtering.
-  - `is_user_specified_collection` (bool, optional): Use a specific collection name.
 - Example:
 ```yaml
 retriever_function:
@@ -838,9 +826,8 @@ retriever_function:
 - Optional Tools: `reranker`.
 - Parameters (src/vss_ctx_rag/functions/rag/foundation_rag/foundation_retrieval_func.py:49):
   - `top_k` (int): Number of documents to retrieve semantically. Default: 10.
-  - `multi_channel` (bool, optional): Query across multiple streams if true.
+  - `multi_channel` (bool, optional): Query across multiple streams if true. Default: False.
   - `uuid` (str, optional): Stream namespace identifier.
-  - `image` (bool, optional): Attach extracted frames to the prompt where supported.
 - Example:
 ```yaml
 retriever_function:
@@ -858,9 +845,8 @@ retriever_function:
 - Required Tools: `vlm` (vision-capable LLM), `db` (vector/graph backed retriever), `image_fetcher`.
 - Parameters (src/vss_ctx_rag/functions/rag/vlm_retrieval/vlm_retrieval_func.py:47):
   - `top_k` (int): Number of documents to retrieve semantically. Default: 10.
-  - `num_frames_per_chunk` (int, optional): Frames per chunk to pass to VLM.
-  - `multi_channel` (bool, optional): Query across multiple streams if true.
-  - `uuid` (str, optional): Stream namespace identifier.
+  - `num_frames_per_chunk` (int, optional): Frames per chunk to pass to VLM. Default: 3.
+  - `multi_channel` (bool, optional): Query across multiple streams if true. Default: False.
 - Example:
 ```yaml
 retriever_function:

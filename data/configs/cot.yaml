@@ -101,9 +101,8 @@ functions:
       image: true
       top_k: 10
     tools:
-      llm: nvidia_llm
+      llm: openai_llm
       db: graph_db
-      vlm: openai_llm
       image_fetcher: image_fetcher
 
 context_manager:

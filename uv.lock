@@ -5864,7 +5864,7 @@ wheels = [
 
 [[package]]
 name = "vss-ctx-rag"
-version = "1.0.0"
+version = "1.0.1"
 source = { editable = "." }
 dependencies = [
     { name = "bleach" },
@@ -5990,7 +5990,7 @@ provides-extras = ["docs", "arango"]
 
 [[package]]
 name = "vss-ctx-rag-arango"
-version = "1.0.0"
+version = "1.0.1"
 source = { editable = "packages/vss_ctx_rag_arango" }
 dependencies = [
     { name = "cuml-cu12" },

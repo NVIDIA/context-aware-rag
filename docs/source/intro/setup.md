@@ -25,7 +25,7 @@ Docker is required to start the desired Database for the following guide. Instal
 1. Install Docker for the required operating system. [Docker Installation](https://docs.docker.com/engine/install/ubuntu/)
 1. Install Nvidia Container Toolkit to enable CUDA support for Docker. [Nvidia Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
 
-For advanced setup, refer [CA RAG Advanced Setup](../intro/advanced-setup.md)
+For advanced setup, refer [CA-RAG Advanced Setup](../intro/advanced-setup.md)
 
 ## Environment Setup
 
@@ -58,7 +58,7 @@ export NVIDIA_API_KEY=${NVIDIA_API_KEY} #NVIDIA API key
 ### Graph-RAG: Neo4j
 
 ```bash
-export GRAPH_DB_HOST=${GRAPH_DB_HOST} #neo4j
+export GRAPH_DB_HOST=${GRAPH_DB_HOST} #neo4j host, e.g. localhost
 export GRAPH_DB_PORT=${GRAPH_DB_PORT} #neo4j port, e.g. 7687
 export GRAPH_DB_USERNAME=${GRAPH_DB_USERNAME} #neo4j username, e.g. neo4j
 export GRAPH_DB_PASSWORD=${GRAPH_DB_PASSWORD} #neo4j password, e.g. password
@@ -101,7 +101,7 @@ The Context Aware RAG library can be used to both add and retrieve documents usi
 ### Setting up config file
 
 First create a config file to set the LLMs, prompts, and parameters. A sample config file is provided at
-[config/config.yaml](https://github.com/NVIDIA/context-aware-rag/tree/main/config/config.yaml). Refer to the [CA RAG Configuration](../overview/configuration.md) guide for more details.
+[config/config.yaml](https://github.com/NVIDIA/context-aware-rag/tree/main/config/config.yaml). Refer to the [CA-RAG Configuration](../overview/configuration.md) guide for more details.
 
 Here is an example of the config file for using `GraphRAG` using Neo4j DB:
 
@@ -184,7 +184,7 @@ context_manager:
 
 The `summarization` section outlines the system's summarization capabilities. It supports batch processing using a specified LLM model and embedding model. Prompts can be customized for various use cases. The default prompts are tailored to generate captions and summaries for warehouse videos, emphasizing irregular events.
 
-**Caption Prompt:** This prompt is used in VSS only and are not used in Context Aware RAG and can be safely ignored if only using CA RAG.
+**Caption Prompt:** This prompt is used in VSS only and are not used in Context Aware RAG and can be safely ignored if only using CA-RAG.
 
 **Caption Summarization Prompt:** This prompt generates a summary from a batch of captions. The `batch_size` parameter specifies the number of captions to be combined.
 

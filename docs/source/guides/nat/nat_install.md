@@ -40,7 +40,7 @@ Complete the following steps to setup the environment
     uv pip install -e . .[langchain]
     ```
 
-If you are having issues with the above steps, reference the [NeMo-Agent-Toolkit Documentation](https://docs.nvidia.com/nemo-agent-toolkit/latest/index.html)
+If you are having issues with the above steps, reference the [NeMo-Agent-Toolkit Documentation](https://docs.nvidia.com/nemo/agent-toolkit/latest/index.html)
 
 ## Install the Context Aware RAG library
 

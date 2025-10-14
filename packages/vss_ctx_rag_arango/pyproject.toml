@@ -25,7 +25,7 @@ include = ["vss_ctx_rag.*"]
 
 [project]
 name = "vss_ctx_rag_arango"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
     "vss_ctx_rag",
     "python-arango>=8.1.6",

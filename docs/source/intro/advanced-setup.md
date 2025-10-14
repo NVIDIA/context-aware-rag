@@ -343,7 +343,7 @@ COT adds Chain-of-Thought reasoning capabilities to graph-based retrieval. This 
 5. Return final answer with confidence score
 
 
-A full config file can be found at [data/configs/grag.yaml](https://github.com/NVIDIA/context-aware-rag/tree/main/data/configs/cot.yaml)
+A full config file can be found at [data/configs/cot.yaml](https://github.com/NVIDIA/context-aware-rag/tree/main/data/configs/cot.yaml)
 
 **Key Changes from Base Config:**
 ```yaml
@@ -380,7 +380,6 @@ functions:
     tools:
       # ... existing tools
       db: graph_db
-      vlm: openai_llm
 
 # ... rest of config
 ```
