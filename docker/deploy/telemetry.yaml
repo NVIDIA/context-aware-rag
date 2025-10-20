@@ -76,7 +76,7 @@ services:
         condition: service_started
 
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v3.7.0
     container_name: prometheus
     user: ":"
     volumes:
