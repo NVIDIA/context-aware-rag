@@ -21,6 +21,7 @@ the tools it has access to.
 
 import asyncio
 import concurrent.futures
+import importlib
 import multiprocessing
 import os
 import random
@@ -30,6 +31,8 @@ from threading import Thread
 from typing import Dict, Optional
 
 from vss_ctx_rag.context_manager.context_manager_handler import ContextManagerHandler
+from vss_ctx_rag.functions.rag.config import RetrieverConfig
+from vss_ctx_rag.models.function_models import _FUNCTION_CONFIG_REGISTRY
 from vss_ctx_rag.utils.ctx_rag_logger import Metrics, logger
 from vss_ctx_rag.utils.globals import DEFAULT_CONTEXT_MANAGER_CALL_TIMEOUT
 from vss_ctx_rag.utils.otel import init_otel
@@ -39,6 +42,27 @@ import datetime
 WAIT_ON_PENDING = 10  # Amount of time to wait before clearing the pending
 
 mp_ctx = multiprocessing.get_context("spawn")
+
+
+def _is_retriever_function_type(function_type: str) -> bool:
+    """Check if a function type is a retriever by verifying its config inherits from RetrieverConfig.
+
+    Args:
+        function_type: The function type string (e.g., 'graph_retrieval', 'vector_retrieval')
+
+    Returns:
+        True if the function type's config class inherits from RetrieverConfig, False otherwise
+    """
+    mapping = _FUNCTION_CONFIG_REGISTRY.get(function_type)
+    if not mapping:
+        return False
+
+    try:
+        module = importlib.import_module(mapping["module"])
+        config_class = getattr(module, mapping["class"])
+        return issubclass(config_class, RetrieverConfig)
+    except (ImportError, AttributeError):
+        return False
 
 
 class ContextManagerProcess(mp_ctx.Process):
@@ -74,6 +98,22 @@ class ContextManagerProcess(mp_ctx.Process):
                 f"Invalid CONTEXT_MANAGER_CALL_TIMEOUT value: {timeout_env}, using default 3600s (1 hour)"
             )
             self.timeout = DEFAULT_CONTEXT_MANAGER_CALL_TIMEOUT
+
+        # Extract max_concurrency from retriever function config if available
+        self._max_concurrency = 1  # Default to serial processing
+        if "functions" in config:
+            for func_name, func_config in config["functions"].items():
+                func_type = func_config.get("type", "")
+                if _is_retriever_function_type(func_type):
+                    params = func_config.get("params", {})
+                    self._max_concurrency = params.get("max_concurrency", 20)
+                    logger.info(
+                        f"Process Index: {process_index} - Setting retriever max_concurrency to {self._max_concurrency} (from {func_type})"
+                    )
+                    break
+
+        self._call_executor = None  # Will be initialized in run()
+        self._pending_call_futures = []
 
     def wait_for_initialization(self):
         """Wait for the process initialization to complete
@@ -116,7 +156,63 @@ class ContextManagerProcess(mp_ctx.Process):
         """Stop the process"""
         logger.info(f"Stopping Context Manager Process no.: {self.process_index}")
         self._stop.set()
+        if self._call_executor:
+            self._call_executor.shutdown(wait=True)
         self.join()
+
+    def _handle_call_request(self, item: Dict):
+        """Handle a single call request concurrently"""
+        try:
+            with Metrics(
+                "context_manager/call-manager",
+                "blue",
+                span_kind=Metrics.SPAN_KIND["CHAIN"],
+            ) as tm:
+                # Wait for add docs to finish
+                with Metrics("context_manager/call/pending_add_doc", "blue"):
+                    with self._pending_requests_lock:
+                        pending_requests_copy = self._pending_add_doc_requests.copy()
+                    logger.debug(
+                        f"Process Index: {self.process_index} - Waiting for {len(pending_requests_copy)} add_doc requests to complete"
+                    )
+                    done, _ = concurrent.futures.wait(pending_requests_copy)
+                    logger.debug(
+                        f"Process Index: {self.process_index} - Pending Add Doc requests Done: {len(done)} requests"
+                    )
+                    # Check each completed future for exceptions
+                    for future in done:
+                        try:
+                            future.result(timeout=self.timeout)
+                        except Exception as e:
+                            logger.error(
+                                f"Process Index: {self.process_index} - Some add_doc failed to complete: {e}"
+                            )
+
+                # Execute the actual call
+                tm.input(item["call"])
+                state = item["call"]
+                logger.debug(
+                    f"Process Index: {self.process_index} - context manager call"
+                )
+                future = asyncio.run_coroutine_threadsafe(
+                    self.cm_handler.call(state), self.event_loop
+                )
+                try:
+                    result = future.result(timeout=self.timeout)
+                    self._response_queue.put(result)
+                    logger.debug(
+                        f"Process Index: {self.process_index} - Context manager call result: {result}"
+                    )
+                except concurrent.futures.TimeoutError as e:
+                    logger.error(
+                        f"Process Index: {self.process_index} - Timeout waiting for context manager call result {self.timeout}s"
+                    )
+                    self._response_queue.put({"error": str(e)})
+        except Exception as e:
+            logger.error(
+                f"Process Index: {self.process_index} - Error calling context manager: {e}"
+            )
+            self._response_queue.put({"error": str(e)})
 
     def run(self) -> None:
         # Run while not signalled to stop
@@ -128,6 +224,16 @@ class ContextManagerProcess(mp_ctx.Process):
             self.t = Thread(target=self.start_bg_loop, daemon=True)
             self.t.start()
             self._initialize()
+
+            # Initialize the thread pool executor for concurrent call processing
+            self._call_executor = concurrent.futures.ThreadPoolExecutor(
+                max_workers=self._max_concurrency,
+                thread_name_prefix=f"ctx-mgr-{self.process_index}-call",
+            )
+            logger.info(
+                f"Process Index: {self.process_index} - Initialized call executor with max_workers={self._max_concurrency}"
+            )
+
             lastTime = datetime.datetime.now()
 
             while not self._stop.is_set():
@@ -212,68 +318,18 @@ class ContextManagerProcess(mp_ctx.Process):
                             self._reset_queue.put({"error": str(e)})
                     elif item and "call" in item:
                         logger.debug(
-                            f"Process Index: {self.process_index} - Processing call request: {item['call']}"
+                            f"Process Index: {self.process_index} - Submitting call request to executor"
                         )
-                        with Metrics(
-                            "context_manager/call-manager",
-                            "blue",
-                            span_kind=Metrics.SPAN_KIND["CHAIN"],
-                        ) as tm:
-                            # TODO: Wait for add docs to finish
-                            with Metrics(
-                                "context_manager/call/pending_add_doc", "blue"
-                            ) as tm:
-                                with self._pending_requests_lock:
-                                    pending_requests_copy = (
-                                        self._pending_add_doc_requests.copy()
-                                    )
-                                logger.debug(
-                                    f"Process Index: {self.process_index} - Waiting for {len(pending_requests_copy)} add_doc requests to complete, {item['call']}"
-                                )
-                                done, _ = concurrent.futures.wait(pending_requests_copy)
-                                logger.debug(
-                                    f"Process Index: {self.process_index} - Pending Add Doc requests Done: {len(done)} requests"
-                                )
-                                # Check each completed future for exceptions
-                                for future in done:
-                                    try:
-                                        logger.debug(
-                                            f"Process Index: {self.process_index} - Processing add_doc request..."
-                                        )
-                                        future.result(
-                                            timeout=self.timeout
-                                        )  # This will raise the exception if one occurred
-                                    except Exception as e:
-                                        logger.error(
-                                            f"Process Index: {self.process_index} - Some add_doc failed to complete: {e}"
-                                        )
+                        # Submit the call to the thread pool for concurrent processing
+                        future = self._call_executor.submit(
+                            self._handle_call_request, item
+                        )
+                        self._pending_call_futures.append(future)
 
-                            try:
-                                tm.input(item["call"])
-                                state = item["call"]
-                                logger.debug(
-                                    f"Process Index: {self.process_index} - context manager call"
-                                )
-                                future = asyncio.run_coroutine_threadsafe(
-                                    self.cm_handler.call(state), self.event_loop
-                                )
-                                try:
-                                    result = future.result(timeout=self.timeout)
-                                    self._response_queue.put(result)
-                                    logger.debug(
-                                        f"Process Index: {self.process_index} - Context manager call result: {result}"
-                                    )
-                                except concurrent.futures.TimeoutError as e:
-                                    logger.error(
-                                        f"Process Index: {self.process_index} - Timeout waiting for context manager call result {self.timeout}s"
-                                    )
-                                    self._response_queue.put({"error": str(e)})
-                            except Exception as e:
-                                tm.error(e)
-                                logger.error(
-                                    f"Process Index: {self.process_index} - Error calling context manager: {e}"
-                                )
-                                self._response_queue.put({"error": str(e)})
+                        # Clean up completed futures periodically
+                        self._pending_call_futures = [
+                            f for f in self._pending_call_futures if not f.done()
+                        ]
                     elif item and ("configure" in item):
                         with Metrics(
                             "context_manager/configure",
@@ -307,6 +363,14 @@ class ContextManagerProcess(mp_ctx.Process):
             logger.error(f"Process Index: {self.process_index} - Exception in run: {e}")
             logger.error(traceback.format_exc())
             raise e
+        finally:
+            # Wait for pending call futures to complete
+            if self._call_executor:
+                logger.info(
+                    f"Process Index: {self.process_index} - Waiting for {len(self._pending_call_futures)} pending calls to complete"
+                )
+                concurrent.futures.wait(self._pending_call_futures, timeout=30)
+                self._call_executor.shutdown(wait=False)
 
     def _add_pending_request(self, future):
         with self._pending_requests_lock:

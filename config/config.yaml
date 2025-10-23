@@ -84,6 +84,7 @@ functions:
     type: graph_retrieval
     params:
       top_k: 5
+      max_concurrency: 32
     tools:
       llm: nvidia_llm
       db: graph_db

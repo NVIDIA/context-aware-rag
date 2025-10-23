@@ -55,5 +55,10 @@ class RetrieverConfig(FunctionModel):
         image: Optional[bool] = Field(default=False)
         citations: Optional[dict] = Field(default={})
         prompt_config_path: Optional[str] = Field(default=None)
+        max_concurrency: Optional[int] = Field(
+            default=20,
+            ge=1,
+            description="Maximum number of concurrent retrieval requests to process",
+        )
 
     params: RetrieverParams
