@@ -58,8 +58,6 @@ tools:
       base_url: "https://ai.api.nvidia.com/v1/retrieval/nvidia/llama-3_2-nv-rerankqa-1b-v2/reranking"
       api_key: !ENV ${NVIDIA_API_KEY}
 
-<<<<<<< HEAD
-=======
   external_embedding:
     type: embedding
     params:
@@ -82,7 +80,6 @@ tools:
       vector_db: external_vector_db
       reranker: nvidia_reranker
 
->>>>>>> 9b057ed ( make external rag fully configurable and independent)
 functions:
   summarization:
     type: batch_summarization
