@@ -15,14 +15,96 @@
 
 import asyncio
 from pydantic import BaseModel, Field
-from typing import Any, Optional, Type, Dict, List, ClassVar
+from typing import Any, Optional, Type, Dict, List
 import math
 from langchain_core.runnables import RunnableConfig
 import os
+import base64
+import cv2
+import numpy as np
+import tempfile
 from vss_ctx_rag.functions.rag.graph_rag.prompt import PromptCapableTool
 from vss_ctx_rag.tools.storage.graph_storage_tool import GraphStorageTool
 from vss_ctx_rag.utils.ctx_rag_logger import logger
 from vss_ctx_rag.tools.image.image_fetcher import ImageFetcher
+
+
+def convert_frames_to_video_base64(base64_frames: List[str], fps: float = 2.0) -> str:
+    """
+    Convert a list of base64-encoded JPEG frames into a single base64-encoded MP4 video.
+
+    Args:
+        base64_frames: List of base64-encoded JPEG image strings
+        fps: Frames per second for the output video (default: 2.0)
+
+    Returns:
+        Base64-encoded MP4 video string, or empty string on failure
+    """
+    if not base64_frames:
+        return ""
+    logger.info(f"Converting {len(base64_frames)} frames to video with fps {fps}")
+    try:
+        # Decode first frame to get dimensions
+        first_frame_bytes = base64.b64decode(base64_frames[0])
+        first_frame = cv2.imdecode(
+            np.frombuffer(first_frame_bytes, np.uint8), cv2.IMREAD_COLOR
+        )
+
+        if first_frame is None:
+            logger.error("Failed to decode first frame")
+            return ""
+
+        height, width = first_frame.shape[:2]
+
+        # Create temporary file for video
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp_file:
+            temp_path = tmp_file.name
+
+        video_writer = None
+        try:
+            # Write video in H264 format
+            fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+            video_writer = cv2.VideoWriter(temp_path, fourcc, fps, (width, height))
+
+            if not video_writer.isOpened():
+                logger.error("Failed to initialize video writer")
+                return ""
+
+            # Write all frames
+            for i, base64_frame in enumerate(base64_frames):
+                try:
+                    frame_bytes = base64.b64decode(base64_frame)
+                    frame = cv2.imdecode(
+                        np.frombuffer(frame_bytes, np.uint8), cv2.IMREAD_COLOR
+                    )
+                    if frame is not None:
+                        video_writer.write(frame)
+                    else:
+                        logger.warning(f"Failed to decode frame {i}, skipping")
+                except Exception as e:
+                    logger.warning(f"Error processing frame {i}: {e}, skipping")
+                    continue
+
+            video_writer.release()
+            video_writer = None
+
+            # Read the video file and encode to base64
+            with open(temp_path, "rb") as video_file:
+                video_base64 = base64.b64encode(video_file.read()).decode("utf-8")
+
+            return video_base64
+
+        finally:
+            # Ensure video writer is released
+            if video_writer is not None:
+                video_writer.release()
+            # Clean up temporary file
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+
+    except Exception as e:
+        logger.error(f"Error converting frames to video: {e}")
+        return ""
 
 
 def get_entities(
@@ -131,6 +213,17 @@ class ChunkFilter(PromptCapableTool):
         return {
             "xml_format": """#### Query Formats:
 
+Question about time range:
+```
+<execute>
+  <step>1</step>
+  <tool>chunk_filter</tool>
+  <input>
+    <range>start_time:end_time</range>
+  </input>
+</execute>
+```
+
 Question about specific camera/video and time range:
 ```
 <execute>
@@ -139,16 +232,6 @@ Question about specific camera/video and time range:
   <input>
     <range>start_time:end_time</range>
     <camera_id>camera_X</camera_id>
-  </input>
-</execute>
-```
-
-Question about time range:
-<execute>
-  <step>1</step>
-  <tool>chunk_filter</tool>
-  <input>
-    <range>start_time:end_time</range>
   </input>
 </execute>
 ```""",
@@ -274,7 +357,6 @@ class ChunkSearch(PromptCapableTool):
         topk: Optional[int] = 5,
     ) -> str:
         """Use the tool."""
-
         return get_chunks(
             self.graph_db,
             query,
@@ -446,7 +528,7 @@ class NextChunk(PromptCapableTool):
 
 class ChunkReaderInput(BaseModel):
     query: str = Field(description="Question to ask about the image of the chunk")
-    chunk_id: Optional[str] = Field(None, description="Chunk ID to fetch images from")
+    chunk_id: Optional[list] = Field(None, description="Chunk ID to fetch images from")
     start_time: Optional[str] = Field(
         None, description="Start time of the chunk to fetch images from"
     )
@@ -489,9 +571,68 @@ def round_down_to_nearest_chunk_size(number, chunk_size):
     return math.floor(number / chunk_size) * chunk_size
 
 
+def merge_adjacent_time_ranges(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Merge adjacent or overlapping time ranges from a list of results.
+
+    Args:
+        results: List of dicts containing 'asset_dir' and 'time_range' (tuple of start, end)
+
+    Returns:
+        List of merged results with adjacent time ranges combined
+    """
+    if not results:
+        return []
+
+    # Sort by start time
+    sorted_results = sorted(
+        results,
+        key=lambda x: x["time_range"][0] if x.get("time_range") else float("inf"),
+    )
+
+    merged = []
+    current = sorted_results[0].copy()
+
+    for next_item in sorted_results[1:]:
+        current_range = current.get("time_range")
+        next_range = next_item.get("time_range")
+
+        # Skip items without time_range
+        if not current_range or not next_range:
+            merged.append(current)
+            current = next_item.copy()
+            continue
+
+        current_end = current_range[1]
+        next_start = next_range[0]
+        next_end = next_range[1]
+
+        # Check if time ranges are adjacent or overlapping
+        # Adjacent means the end of current equals start of next
+        # Overlapping means there's any overlap
+        if current_end >= next_start:
+            # Merge: extend current range to cover both
+            current["time_range"] = (current_range[0], max(current_end, next_end))
+            # Keep the first asset_dir, or concatenate if different
+            if current.get("asset_dir") != next_item.get("asset_dir"):
+                # If asset_dirs are different, we might want to keep both
+                # For now, we'll keep the first one and note this in a list
+                if "merged_asset_dirs" not in current:
+                    current["merged_asset_dirs"] = [current["asset_dir"]]
+                current["merged_asset_dirs"].append(next_item["asset_dir"])
+        else:
+            # Not adjacent, save current and move to next
+            merged.append(current)
+            current = next_item.copy()
+
+    # Don't forget the last item
+    merged.append(current)
+
+    return merged
+
+
 class ChunkReader(PromptCapableTool):
     name: str = "ChunkReader"
-    prompt_name: ClassVar[str] = "Chunk Reader ⭐ **CRITICAL FOR VISUAL QUESTIONS** ⭐"
     description: str = (
         "Use to ask questions about images associated with specific chunk IDs."
         "The tool will fetch images related to the chunk and use an LLM to answer questions about them. "
@@ -504,6 +645,10 @@ class ChunkReader(PromptCapableTool):
     uuid: str
     multi_channel: bool
     num_frames_per_chunk: int
+    include_adjacent_chunks: bool = False
+    pass_video_to_vlm: bool = False
+    num_prev_chunks: int = 1
+    num_next_chunks: int = 1
 
     def __init__(
         self,
@@ -513,6 +658,10 @@ class ChunkReader(PromptCapableTool):
         multi_channel: bool = False,
         image_fetcher: ImageFetcher = None,
         num_frames_per_chunk: int = 30,
+        include_adjacent_chunks: bool = False,
+        pass_video_to_vlm: bool = False,
+        num_prev_chunks: int = 1,
+        num_next_chunks: int = 1,
     ):
         super().__init__(
             graph_db=graph_db,
@@ -521,6 +670,10 @@ class ChunkReader(PromptCapableTool):
             uuid=uuid,
             multi_channel=multi_channel,
             num_frames_per_chunk=num_frames_per_chunk,
+            include_adjacent_chunks=include_adjacent_chunks,
+            pass_video_to_vlm=pass_video_to_vlm,
+            num_prev_chunks=num_prev_chunks,
+            num_next_chunks=num_next_chunks,
         )
 
     @classmethod
@@ -625,7 +778,7 @@ class ChunkReader(PromptCapableTool):
     def _run(
         self,
         query: str,
-        chunk_id: Optional[str] = None,
+        chunk_id: Optional[list] = None,
         start_time: Optional[str] = None,
         end_time: Optional[str] = None,
         config: RunnableConfig = None,
@@ -650,7 +803,7 @@ class ChunkReader(PromptCapableTool):
     async def _arun(
         self,
         query: str,
-        chunk_id: Optional[str] = None,
+        chunk_id: Optional[list] = None,
         start_time: Optional[str] = None,
         end_time: Optional[str] = None,
         config: RunnableConfig = None,
@@ -665,108 +818,363 @@ class ChunkReader(PromptCapableTool):
             "yes",
             "on",
         ]
+        # Option to include adjacent chunks for more context
+        # Environment variables:
+        #   - INCLUDE_ADJACENT_CHUNKS: Enable/disable adjacent chunk inclusion (default: false)
+        #   - NUM_PREV_CHUNKS: Number of previous chunks to include (default: 1)
+        #   - NUM_NEXT_CHUNKS: Number of next chunks to include (default: 1)
+        # Adjacent chunks are found based on time range continuity, not chunk ID sequence
+
+        # Number of previous and next chunks to include
+        num_prev_chunks = self.num_prev_chunks
+        num_next_chunks = self.num_next_chunks
+        chunk_ids = (
+            sorted(
+                chunk_id,
+                key=lambda x: (
+                    self.graph_db.get_chunk_time_range(x) or (float("inf"),)
+                )[0],
+            )
+            if chunk_id
+            else []
+        )
+
         try:
-            if chunk_id:
-                asset_dir = self.graph_db.get_chunk_asset_dir(chunk_id)
-                time_range = self.graph_db.get_chunk_time_range(chunk_id)
-                camera_id = self.graph_db.get_chunk_camera_id(chunk_id)
-                if time_range:
-                    start_time, end_time = time_range
-                else:
-                    return "No images found for the specified chunk ID."
-                result = [{"asset_dir": asset_dir}] if asset_dir else []
+            result = []
+
+            # Handle case when chunk_ids are provided
+            if chunk_ids:
+                for chunk_id in chunk_ids:
+                    if chunk_id:
+                        asset_dir = self.graph_db.get_chunk_asset_dir(chunk_id)
+                        time_range = self.graph_db.get_chunk_time_range(chunk_id)
+                        camera_id = self.graph_db.get_chunk_camera_id(chunk_id)
+                        if time_range:
+                            start_time, end_time = time_range
+                        else:
+                            return "No images found for the specified chunk ID."
+                        result.extend(
+                            [
+                                {
+                                    "asset_dir": asset_dir,
+                                    "time_range": time_range,
+                                    "chunk_id": chunk_id,
+                                }
+                            ]
+                        ) if asset_dir else None
+
+                        # Include adjacent chunks if enabled (based on time range)
+                        if self.include_adjacent_chunks:
+                            chunk_size = config["configurable"].get("chunk_size", 10)
+                            if camera_id:
+                                chunk_size_val = (
+                                    int(chunk_size.get(camera_id, 10))
+                                    if isinstance(chunk_size, dict)
+                                    else int(chunk_size)
+                                )
+                            else:
+                                chunk_size_val = (
+                                    int(chunk_size.get("", 10))
+                                    if isinstance(chunk_size, dict)
+                                    else int(chunk_size)
+                                )
+
+                            # Get previous chunks (working backwards from current chunk)
+                            prev_chunks_to_add = []
+                            current_start = start_time
+                            for i in range(num_prev_chunks):
+                                try:
+                                    # Find chunk where end_time is close to current_start
+                                    candidate_start_time = (
+                                        current_start - chunk_size_val
+                                    )
+                                    candidate_end_time = current_start
+                                    asset_dirs = (
+                                        self.graph_db.get_asset_dirs_by_time_range(
+                                            candidate_start_time, candidate_end_time
+                                        )
+                                    )
+                                    if asset_dirs:
+                                        for asset_dir in asset_dirs:
+                                            prev_chunks_to_add.insert(
+                                                0,
+                                                {
+                                                    "asset_dir": asset_dir,
+                                                    "time_range": (
+                                                        candidate_start_time,
+                                                        candidate_end_time,
+                                                    ),
+                                                },
+                                            )
+                                    current_start = candidate_start_time
+                                except Exception as e:
+                                    logger.debug(
+                                        f"Could not retrieve previous chunk {i+1}: {e}"
+                                    )
+
+                            logger.debug(
+                                f"Previous chunks to add: {prev_chunks_to_add}"
+                            )
+                            # Add all previous chunks at the beginning
+                            result.extend(prev_chunks_to_add)
+
+                            # Get next chunks (working forwards from current chunk)
+                            next_chunks_to_add = []
+                            current_end = end_time
+                            for i in range(num_next_chunks):
+                                try:
+                                    candidate_start_time = current_end
+                                    candidate_end_time = current_end + chunk_size_val
+                                    asset_dirs = (
+                                        self.graph_db.get_asset_dirs_by_time_range(
+                                            candidate_start_time, candidate_end_time
+                                        )
+                                    )
+                                    if asset_dirs:
+                                        for asset_dir in asset_dirs:
+                                            next_chunks_to_add.append(
+                                                {
+                                                    "asset_dir": asset_dir,
+                                                    "time_range": (
+                                                        candidate_start_time,
+                                                        candidate_end_time,
+                                                    ),
+                                                }
+                                            )
+                                    current_end = candidate_end_time
+                                except Exception as e:
+                                    logger.debug(
+                                        f"Could not retrieve next chunk {i+1}: {e}"
+                                    )
+
+                            logger.debug(f"Next chunks to add: {next_chunks_to_add}")
+                            # Add all next chunks at the end
+                            result.extend(next_chunks_to_add)
+
+            # Handle case when start_time and end_time are provided without chunk_ids
             elif start_time and end_time:
                 chunk_size = config["configurable"].get("chunk_size", 10)
                 if camera_id:
-                    chunk_size = chunk_size[camera_id]
+                    chunk_size = (
+                        int(chunk_size[camera_id])
+                        if isinstance(chunk_size, dict)
+                        else int(chunk_size)
+                    )
                 else:
-                    chunk_size = chunk_size[""] if chunk_size else 10.0
-                start_time = round_down_to_nearest_chunk_size(
-                    float(start_time), chunk_size
-                )
-                end_time = round_up_to_nearest_chunk_size(float(end_time), chunk_size)
+                    chunk_size = (
+                        int(chunk_size.get("", 10))
+                        if isinstance(chunk_size, dict)
+                        else int(chunk_size)
+                    )
+
+                original_start = float(start_time)
+                original_end = float(end_time)
+
+                # Optionally expand time range to include adjacent chunks
+                if self.include_adjacent_chunks:
+                    start_time = round_down_to_nearest_chunk_size(
+                        original_start - chunk_size, chunk_size
+                    )
+                    end_time = round_up_to_nearest_chunk_size(
+                        original_end + chunk_size, chunk_size
+                    )
+                    logger.debug(
+                        f"Expanded time range from [{original_start}, {original_end}] to [{start_time}, {end_time}] to include adjacent chunks"
+                    )
+                else:
+                    start_time = round_down_to_nearest_chunk_size(
+                        original_start, chunk_size
+                    )
+                    end_time = round_up_to_nearest_chunk_size(original_end, chunk_size)
+
                 dirs = self.graph_db.get_asset_dirs_by_time_range(start_time, end_time)
                 if is_subtitle and pass_subtitle:
-                    subtitles = self.graph_db.filter_subtitles_by_time_range(
-                        start_time, end_time
+                    subtitles.extend(
+                        self.graph_db.filter_subtitles_by_time_range(
+                            start_time, end_time
+                        )
                     )
-                result = [{"asset_dir": d} for d in dirs]
-            else:
-                result = []
+                result.extend(
+                    [
+                        {"asset_dir": d, "time_range": (start_time, end_time)}
+                        for d in dirs
+                    ]
+                )
 
             if not result:
                 return "No images found for the specified chunk ID."
 
             responses: List[Any] = []
             tasks: List[Any] = []
+            image_message_list = []
+
+            # Remove duplicate asset_dir entries while preserving order
+            seen_asset_dirs = set[Any]()
+            deduplicated_result = []
             for r in result:
                 asset_dir = r["asset_dir"]
-                logger.debug(f"asset_dir: {asset_dir}")
-                if not asset_dir:
-                    logger.error("No image assets found for the specified chunk ID.")
-                    continue
-                # Get images from the asset directory
-                image_list_base64 = self.image_fetcher.get_image_base64(
-                    asset_dir, self.num_frames_per_chunk
+                if asset_dir not in seen_asset_dirs:
+                    seen_asset_dirs.add(asset_dir)
+                    deduplicated_result.append(r)
+            result = deduplicated_result
+
+            # Merge adjacent time ranges to optimize processing
+            result = merge_adjacent_time_ranges(result)
+
+            logger.info(
+                f"Deduplicated and merged result: {len(result)} chunks covering time ranges"
+            )
+            logger.debug(f"Full result details: {result}")
+            all_images_base64 = []
+            # Track overall time range across all results for accurate FPS calculation
+            overall_start_time = float("inf")
+            overall_end_time = float("-inf")
+            for i, r in enumerate(result):
+                # Handle merged asset directories
+                asset_dirs = r.get("merged_asset_dirs", [r["asset_dir"]])
+                time_range = r["time_range"]
+                # Update overall time range bounds
+                overall_start_time = min(overall_start_time, time_range[0])
+                overall_end_time = max(overall_end_time, time_range[1])
+                logger.debug(
+                    f"Processing asset_dirs: {asset_dirs} with time_range: {time_range}"
                 )
-                if not image_list_base64:
-                    logger.error(
-                        "Failed to retrieve images for the specified chunk ID."
+
+                # Collect images from all asset directories (for merged time ranges)
+
+                for asset_dir in asset_dirs:
+                    if not asset_dir:
+                        logger.warning(
+                            "No image assets found for the specified chunk ID."
+                        )
+                        continue
+                    # Get images from the asset directory
+                    image_list_base64 = self.image_fetcher.get_image_base64(
+                        asset_dir, self.num_frames_per_chunk
+                    )
+                    if len(image_list_base64) <= 1 and self.pass_video_to_vlm:
+                        logger.warning(
+                            f"Only {len(image_list_base64)} images found for the asset directory: {asset_dir}. "
+                            f"Consider enabling include_adjacent_chunks=True for more context. Skipping this asset directory."
+                        )
+                        continue
+                    if image_list_base64:
+                        all_images_base64.extend(image_list_base64)
+                    else:
+                        logger.warning(
+                            f"Failed to retrieve images from asset directory: {asset_dir}"
+                        )
+
+                if not all_images_base64:
+                    logger.warning(
+                        "Failed to retrieve any images for the specified chunk ID(s). "
+                        "Try setting include_adjacent_chunks=true for more temporal context."
                     )
                     continue
 
+            # Calculate total duration from overall time range
+            total_duration = overall_end_time - overall_start_time
+            if total_duration <= 0:
+                logger.warning(
+                    f"Invalid total duration ({total_duration}), defaulting to 1.0 second"
+                )
+                total_duration = 1.0
+
+            if self.pass_video_to_vlm:
+                logger.debug(
+                    f"Processing {len(all_images_base64)} frames for video conversion"
+                )
+                # Convert frames to a single video
+                video_base64 = convert_frames_to_video_base64(
+                    all_images_base64,
+                    fps=float(len(all_images_base64)) / total_duration,
+                )
+
+                if not video_base64:
+                    logger.error("Failed to convert frames to video.")
+
+                # Prepare video message for the LLM
+                image_message_list.append(
+                    {
+                        "type": "video_url",
+                        "video_url": {
+                            "url": f"data:video/mp4;base64,{video_base64}",
+                        },
+                    }
+                )
+            else:
+                logger.debug(f"Passing {len(all_images_base64)} images to the LLM")
                 # Prepare image messages for the LLM
                 image_message_list = [
                     {
                         "type": "image_url",
                         "image_url": {
                             "url": f"data:image/jpeg;base64,{img}",
-                            "chunk_id": chunk_id,
                         },
                     }
-                    for img in image_list_base64
+                    for img in all_images_base64
                 ]
-                logger.debug(f"image_message_list: {len(image_message_list)}")
-                if image_message_list:
-                    # Prepare the prompt for the LLM
-                    messages = [
-                        {
-                            "role": "system",
-                            "content": (
-                                "You are an AI assistant that answers questions about images. "
-                                "Analyze the provided images carefully and answer the question based on what you can see. "
-                                "If you cannot determine the answer from the images, say so clearly. "
-                                "Be specific and descriptive in your answers."
-                                f"Subtitles for the timerange are: {subtitles}"
-                                if is_subtitle and pass_subtitle
-                                else ""
-                            ),
-                        },
-                        {
-                            "role": "user",
-                            "content": [
-                                *image_message_list,
-                                {"type": "text", "text": f"Question: {query}"},
-                            ],
-                        },
-                    ]
-                    tasks.append(
-                        asyncio.create_task(
-                            self.chat_llm.ainvoke(messages), name="ChunkReader"
-                        )
+
+            if image_message_list:
+                logger.debug(f"image_message_list : {len(image_message_list)}")
+                # Prepare the prompt for the LLM
+                messages = [
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are an AI assistant that answers questions about images. "
+                            "Analyze the provided images carefully and answer the question based on what you can see. "
+                            "If you cannot determine the answer from the images, say so clearly. "
+                            "Be specific and descriptive in your answers."
+                            f"Subtitles for the timerange are: {subtitles}"
+                            if is_subtitle and pass_subtitle
+                            else ""
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": [
+                            *image_message_list,
+                            {
+                                "type": "text",
+                                "text": f"Answer the question: {query}. Only reply with the option.",
+                            },
+                        ],
+                    },
+                ]
+                tasks.append(
+                    asyncio.create_task(
+                        self.chat_llm.ainvoke(
+                            messages,
+                            extra_body={
+                                "mm_processor_kwargs": {
+                                    "fps": float(len(all_images_base64))
+                                    / total_duration,
+                                    "do_sample_frames": False,
+                                    "min_pixels": 4 * 32 * 32,
+                                    "max_pixels": 256 * 32 * 32,
+                                    "total_pixels": 20480 * 32 * 32,
+                                }
+                            }
+                            if self.pass_video_to_vlm
+                            else None,
+                        ),
+                        name="ChunkReader",
                     )
-                else:
-                    responses.append("No images found for the specified chunk ID.")
+                )
+            else:
+                responses.append("No images found for the specified chunk ID.")
             responses = await asyncio.gather(*tasks)
             return {
                 "query": query,
                 "response": [response.content for response in responses],
-                "start_time": start_time,
-                "end_time": end_time,
-                "camera_id": camera_id,
             }
 
-        except ValueError:
+        except ValueError as e:
+            logger.error(f"Error in ImageQnA tool: {str(e)}")
+            import traceback
+
+            logger.error(f"Error in ImageQnA tool: {traceback.format_exc()}")
             return "Invalid chunk ID format. Please provide a valid chunk ID."
         except Exception as e:
             logger.error(f"Error in ImageQnA tool: {str(e)}")
@@ -798,9 +1206,6 @@ class SubtitleSearchInput(BaseModel):
 
 class SubtitleSearch(PromptCapableTool):
     name: str = "SubtitleSearch"
-    prompt_name: ClassVar[str] = (
-        "Subtitle Search ⭐ **ALWAYS USE FIRST FOR SUBTITLE QUESTIONS** ⭐"
-    )
     description: str = "Use to find subtitles that semantically match the query."
     args_schema: Type[BaseModel] = SubtitleSearchInput
     graph_db: GraphStorageTool
@@ -900,9 +1305,6 @@ class SubtitleFilterInput(BaseModel):
 
 class SubtitleFilter(PromptCapableTool):
     name: str = "SubtitleFilter"
-    prompt_name: ClassVar[str] = (
-        "Subtitle Filter ⭐ **CRITICAL FOR SUBTITLE QUESTIONS** ⭐"
-    )
     description: str = "Use for retrieving subtitles based on temporal range"
     args_schema: Type[BaseModel] = SubtitleFilterInput
     graph_db: GraphStorageTool

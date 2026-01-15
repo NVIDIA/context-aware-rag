@@ -14,6 +14,11 @@
 # limitations under the License.
 FROM python:3.12-bookworm
 
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgl1 \
+    libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN groupadd -g 1000 appuser && \
     useradd -r -u 1000 -g appuser -m -d /home/appuser appuser
 

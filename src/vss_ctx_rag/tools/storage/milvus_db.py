@@ -219,24 +219,6 @@ class MilvusDBTool(VectorStorageTool):
             doc = Document(page_content=summary, metadata=metadata)
             return await self.get_current_collection().aadd_documents([doc])
 
-    def add_summaries(self, batch_summary: list[str], batch_metadata: list[dict]):
-        with Metrics(
-            "Milvus/AddSummries", "yellow", span_kind=Metrics.SPAN_KIND["TOOL"]
-        ) as tm:
-            tm.input({"batch_summary": batch_summary, "batch_metadata": batch_metadata})
-            if len(batch_summary) != len(batch_metadata):
-                raise ValueError(
-                    "Incorrect param. The length of batch_summary batch and\
-                    metadata batch should match."
-                )
-            docs = []
-            for i in range(len(batch_summary)):
-                docs.append(
-                    Document(page_content=batch_summary[i], metadata=batch_metadata[i])
-                )
-            document_chunks = self.text_splitter.split_documents(docs)
-            self.get_current_collection().add_documents(document_chunks)
-
     @staticmethod
     def _escape(val: str) -> str:
         return val.replace("\\", "\\\\").replace("'", "\\'")

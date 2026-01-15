@@ -252,7 +252,7 @@ nim-llm:
       value: "128000"
   resources:
     limits:
-      nvidia.com/gpu: 0    # no limit
+      nvidia.com/gpu: 0    # disable k8s GPU allocation, using NVIDIA_VISIBLE_DEVICES instead
 
 carag-ingestion:
   applicationSpecs:
@@ -264,7 +264,7 @@ carag-ingestion:
               value: "2"
           resources:
             limits:
-              nvidia.com/gpu: 0    # no limit
+              nvidia.com/gpu: 0   # disable k8s GPU allocation, using NVIDIA_VISIBLE_DEVICES instead
 
 carag-retrieval:
   applicationSpecs:
@@ -276,7 +276,7 @@ carag-retrieval:
               value: "2"
           resources:
             limits:
-              nvidia.com/gpu: 0    # no limit
+              nvidia.com/gpu: 0   # disable k8s GPU allocation, using NVIDIA_VISIBLE_DEVICES instead
 
 nemo-embedding:
   applicationSpecs:
@@ -288,7 +288,7 @@ nemo-embedding:
             value: '2'
   resources:
     limits:
-      nvidia.com/gpu: 0    # no limit
+      nvidia.com/gpu: 0   # disable k8s GPU allocation, using NVIDIA_VISIBLE_DEVICES instead
 
 nemo-rerank:
   applicationSpecs:
@@ -300,7 +300,7 @@ nemo-rerank:
             value: '2'
   resources:
     limits:
-      nvidia.com/gpu: 0    # no limit
+      nvidia.com/gpu: 0   # disable k8s GPU allocation, using NVIDIA_VISIBLE_DEVICES instead
 ```
 
 To run the deployment with the overrides, add `-f overrides.yaml` to the command. Also make sure to not set the nim-llm image profile. For example, if using H200, do not set `nim-llm.profile` to `99142c13a095af184ae20945a208a81fae8d650ac0fd91747b03148383f882cf`. It will auto select the appropriate profile based on the number of GPUs.

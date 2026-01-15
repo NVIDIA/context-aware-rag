@@ -284,7 +284,11 @@ class GraphIngestion:
         except Exception as e:
             # Check for specific error code 400 (Bad Request)
             error_message = str(e)
-            if "Error code: 400" in error_message or "BadRequestError" in error_message:
+            if (
+                "Error code: 400" in error_message
+                or "BadRequestError" in error_message
+                or "Invalid JSON:" in error_message
+            ):
                 logger.warning(
                     f"Disabling entity description, LLM doesn't support structured output: {e}{traceback.format_exc()}"
                 )
@@ -590,19 +594,28 @@ class GraphIngestion:
 
         logger.info(f"Found {len(summaries_to_embed)} summaries needing embedding.")
 
+        # Create a new list containing only summaries with actual content
+        valid_summaries = [
+            node for node in summaries_to_embed if node.get("content", "").strip()
+        ]
+
+        if not valid_summaries:
+            logger.info("No valid summaries with content to embed.")
+            return
+
         async def semaphore_controlled_embed(content):
             async with self._embedding_semaphore:
                 return await self.embedding.aembed_query(content)
 
         tasks = [
             asyncio.create_task(semaphore_controlled_embed(node["content"]))
-            for node in summaries_to_embed
-            if node.get("content", "").strip()
+            for node in valid_summaries  # Use the filtered list
         ]
         embeddings = await asyncio.gather(*tasks)
 
         summaries_with_embeddings = []
-        for node, embedding in zip(summaries_to_embed, embeddings):
+        # Use the same filtered list
+        for node, embedding in zip(valid_summaries, embeddings):
             summaries_with_embeddings.append({"id": node["id"], "embedding": embedding})
 
         if summaries_with_embeddings:

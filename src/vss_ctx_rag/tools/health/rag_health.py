@@ -14,6 +14,7 @@
 # limitations under the License.
 
 import json
+from pathlib import Path
 
 
 class GraphMetrics:
@@ -30,6 +31,7 @@ class GraphMetrics:
         Args:
             file_name (str, optional): The file name to write to.
         """
+        Path(file_name).parent.mkdir(parents=True, exist_ok=True)
         data = {
             "graph_create_tokens": self.graph_create_tokens,
             "graph_create_requests": self.graph_create_requests,
@@ -61,6 +63,7 @@ class SummaryMetrics:
         Args:
             file_name (str, optional): The file name to write to.
         """
+        Path(file_name).parent.mkdir(parents=True, exist_ok=True)
         data = {
             "summary_tokens": self.summary_tokens,
             "aggregation_tokens": self.aggregation_tokens,

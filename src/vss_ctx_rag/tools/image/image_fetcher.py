@@ -142,7 +142,7 @@ class ImageFetcher(Tool):
 
                 # Look for pattern like frame_123.jpg or frame_123.jpeg
                 match = re.search(
-                    r"frame_(\d)\.(jpg|jpeg)$", object_name, re.IGNORECASE
+                    r"frame_(\d+)\.(jpg|jpeg)$", object_name, re.IGNORECASE
                 )
                 if match:
                     return int(match.group(1))

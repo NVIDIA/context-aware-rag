@@ -59,6 +59,10 @@ class PlannerRetrievalConfig(RetrieverConfig):
         num_frames_per_chunk: Optional[int] = Field(
             default=DEFAULT_NUM_FRAMES_PER_CHUNK
         )
+        include_adjacent_chunks: Optional[bool] = Field(default=False)
+        pass_video_to_vlm: Optional[bool] = Field(default=False)
+        num_prev_chunks: Optional[int] = Field(default=1)
+        num_next_chunks: Optional[int] = Field(default=1)
 
     params: PlannerRetrievalParams
 
@@ -103,12 +107,18 @@ class Planner(GraphRetrievalBaseFunc):
         self.image_fetcher = self.get_tool("image_fetcher")
         self.multi_channel = self.get_param("multi_channel", default=False)
         self.multi_choice = self.get_param("multi_choice", default=False)
+        self.num_prev_chunks = self.get_param("num_prev_chunks", default=1)
+        self.num_next_chunks = self.get_param("num_next_chunks", default=1)
         # Get max iterations parameter
         self.max_iterations = self.get_param("max_iterations", default=20)
         self.tools = self.get_param("tools", default=None)
         self.num_frames_per_chunk = self.get_param(
             "num_frames_per_chunk", default=DEFAULT_NUM_FRAMES_PER_CHUNK
         )
+        self.include_adjacent_chunks = self.get_param(
+            "include_adjacent_chunks", default=False
+        )
+        self.pass_video_to_vlm = self.get_param("pass_video_to_vlm", default=False)
         self.prompt_config_path = self.get_param("prompt_config_path", default=None)
         self.prompt_config = None
         if self.prompt_config_path:
@@ -131,6 +141,10 @@ class Planner(GraphRetrievalBaseFunc):
                 tools=self.tools,
                 image_fetcher=self.image_fetcher,
                 num_frames_per_chunk=self.num_frames_per_chunk,
+                include_adjacent_chunks=self.include_adjacent_chunks,
+                pass_video_to_vlm=self.pass_video_to_vlm,
+                num_prev_chunks=self.num_prev_chunks,
+                num_next_chunks=self.num_next_chunks,
                 prompt_config=self.prompt_config,
             )
             logger.info(f"Initialized planner agent with top_k={self.top_k}")
@@ -194,6 +208,10 @@ class Planner(GraphRetrievalBaseFunc):
                         tools=extended_tools,
                         image_fetcher=self.image_fetcher,
                         num_frames_per_chunk=self.num_frames_per_chunk,
+                        include_adjacent_chunks=self.include_adjacent_chunks,
+                        pass_video_to_vlm=self.pass_video_to_vlm,
+                        num_prev_chunks=self.num_prev_chunks,
+                        num_next_chunks=self.num_next_chunks,
                         prompt_config=self.prompt_config,
                     )
                 else:
@@ -203,14 +221,11 @@ class Planner(GraphRetrievalBaseFunc):
                 num_cameras = self.graph_db.get_num_cameras()
                 logger.debug(f"Runtime num_cameras: {num_cameras}")
 
-                if self.multi_choice:
-                    video_length = ""
+                if not is_live:
+                    video_length = self.graph_db.get_video_length()
                 else:
-                    if not is_live:
-                        video_length = self.graph_db.get_video_length()
-                    else:
-                        video_length = {}
-                    logger.debug(f"Runtime video_length: {video_length}")
+                    video_length = {}
+                logger.debug(f"Runtime video_length: {video_length}")
 
                 chunk_size = self.graph_db.get_chunk_size()
                 logger.debug(f"Runtime chunk_size: {chunk_size}")
