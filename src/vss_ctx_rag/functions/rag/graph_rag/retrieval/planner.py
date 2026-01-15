@@ -70,6 +70,10 @@ def get_agent(
     tools: list[str] = None,
     image_fetcher: ImageFetcher = None,
     num_frames_per_chunk: int = DEFAULT_NUM_FRAMES_PER_CHUNK,
+    include_adjacent_chunks: bool = False,
+    pass_video_to_vlm: bool = False,
+    num_prev_chunks: int = 1,
+    num_next_chunks: int = 1,
     prompt_config: Optional[Dict] = None,
 ):
     """
@@ -106,6 +110,10 @@ def get_agent(
                     multi_channel,
                     image_fetcher,
                     num_frames_per_chunk,
+                    include_adjacent_chunks,
+                    pass_video_to_vlm,
+                    num_prev_chunks,
+                    num_next_chunks,
                 )
             )
         elif tool == "subtitle_search":
@@ -121,7 +129,6 @@ def get_agent(
         thinking_prompt_content = (
             create_thinking_prompt(
                 tools=tool_list,
-                multi_choice=multi_choice,
                 multi_channel=multi_channel,
             )
             if not (prompt_config and prompt_config["thinking_sys_msg_subtitle_prompt"])
@@ -131,7 +138,6 @@ def get_agent(
         thinking_prompt_content = (
             create_thinking_prompt(
                 tools=tool_list,
-                multi_choice=multi_choice,
                 multi_channel=multi_channel,
             )
             if not (prompt_config and prompt_config["thinking_sys_msg_prompt"])
@@ -141,15 +147,12 @@ def get_agent(
     evaluation_prompt_content = (
         create_evaluation_prompt(
             tools=tool_list,
-            multi_choice=multi_choice,
         )
         if not (prompt_config and prompt_config["evaluation_guidance_prompt"])
         else prompt_config["evaluation_guidance_prompt"]
     )
     response_prompt_content = (
-        create_response_prompt(
-            multi_choice=multi_choice,
-        )
+        create_response_prompt()
         if not (prompt_config and prompt_config["response_sys_msg_prompt"])
         else prompt_config["response_sys_msg_prompt"]
     )
@@ -164,25 +167,23 @@ def get_agent(
     def thinking_agent(state: AgentState):
         # THINKING AGENT - Pure reasoning and planning
         # Format the prompt with runtime num_cameras info
-        if not multi_choice:
-            num_cameras_info = (
-                f"Note: There are {state['num_cameras']} cameras in the video."
-                if multi_channel and state["num_cameras"] > 0
-                else ""
-            )
 
-            video_length_info = (
-                f"Note: The video length of each camera is as follows: {state['video_length']}"
-                if multi_channel
-                else f"Note: The video length is {state['video_length']} seconds."
-            )
-        else:
-            video_length_info = ""
-            num_cameras_info = ""
+        num_cameras_info = (
+            f"Note: There are {state['num_cameras']} cameras in the video."
+            if multi_channel and state["num_cameras"] > 0
+            else ""
+        )
+
+        video_length_info = (
+            f"Note: The video length of each camera is as follows: {state['video_length']}"
+            if multi_channel
+            else f"Note: The video length is {state['video_length']} seconds."
+        )
 
         formatted_prompt = thinking_prompt_content.format(
             num_cameras_info=num_cameras_info, video_length_info=video_length_info
         )
+
         thinking_sys_msg = SystemMessage(content=formatted_prompt)
         # First iteration - create initial plan
         if state["iteration_count"] == 0:
@@ -228,6 +229,7 @@ Evaluate these results and determine if you need more information or if you can 
             "messages": [response],
             "current_plan": response.content,
             "thinking_complete": thinking_complete,
+            "iteration_count": state["iteration_count"] + 1,
         }
 
     # TOOL EXECUTION NODE
@@ -259,7 +261,6 @@ Evaluate these results and determine if you need more information or if you can 
             return {
                 "messages": result["messages"],
                 "execution_results": execution_results_str,
-                "iteration_count": state["iteration_count"] + 1,
             }
 
         return {"messages": []}
@@ -433,6 +434,20 @@ Evaluate these results and determine if you need more information or if you can 
                 else:
                     # Standard case - create single tool call
                     tool_calls.append(create_tool_call(tool_name, input_data))
+
+            chunk_ids = []
+            for tool_call in tool_calls:
+                if tool_call["function"]["name"] == "ChunkReader":
+                    json_data = json.loads(tool_call["function"]["arguments"])
+                    chunk_id = json_data.get("chunk_id", None)
+                    if chunk_id is not None:
+                        chunk_ids.append(chunk_id)
+
+            if chunk_ids:
+                chunk_data = {}
+                chunk_data["chunk_id"] = chunk_ids
+                chunk_data["query"] = json_data.get("query", None)
+                tool_calls = [create_tool_call("chunk_reader", chunk_data)]
 
         except ET.ParseError as e:
             logger.error(f"Error in tool parsing after XML escaping: {str(e)}")

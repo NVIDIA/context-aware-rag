@@ -47,6 +47,8 @@ The section below documents each supported tool type, its purpose, and configura
   - `top_p` (float, optional): Nucleus sampling probability mass (disabled for reasoning models). Default: 0.7.
   - `api_key` (str, optional): API key for the configured backend. Default: "NOAPIKEYSET".
   - `reasoning_effort` (str, optional): Optional reasoning mode hint (LLM‑specific). Default: None.
+  - `presence_penalty` (float, optional): Penalizes repeated tokens. Default: None
+  - `seed` (int, optional): Seed for generation. Default: None
 - Notes: Automatically uses the right token parameter for OpenAI models; can warm up if `CA_RAG_ENABLE_WARMUP=true`.
 - Example:
 ```yaml
@@ -93,6 +95,7 @@ nvidia_embedding:
   - `model` (str): Reranker model identifier.
   - `base_url` (str): Reranker API endpoint.
   - `api_key` (str): API key for the reranking service.
+  - `top_n` (int): Optional. Returns top-n documents. Default: 5
 - Example:
 ```yaml
 nvidia_reranker:
@@ -101,6 +104,7 @@ nvidia_reranker:
     model: nvidia/llama-3.2-nv-rerankqa-1b-v2
     base_url: https://ai.api.nvidia.com/v1/retrieval/nvidia/llama-3_2-nv-rerankqa-1b-v2/reranking
     api_key: !ENV ${NVIDIA_API_KEY}
+    top_n: 10
 ```
 
 #### Storage Tools
@@ -390,6 +394,10 @@ retriever_function:
   - `num_chunks` (int, optional): For image extraction, number of chunks to sample. Default: 3.
   - `max_total_images` (int, optional): Cap on total extracted images. Default: 10.
   - `prompt_config_path` (str, optional): Prompt configuration section below.
+  - `include_adjacent_chunks` (bool, optional): Include adjacent chunk to pass to VLM (ChunkReaderTool specific). Default: False
+  - `pass_video_to_vlm` (bool, optional): Pass video instead of image to VLM (ChunkReaderTool specific). Set to True for Qwen3-vl models. Default: False
+  - `num_prev_chunks` (int, optional): Number of previous chunks to include (ChunkReaderTool specific). Used only if include_adjacent_chunks=true. Default: 1
+  - `num_next_chunks` (int, optional): Number of next chunks to include (ChunkReaderTool specific). Used only if include_adjacent_chunks=true. Default: 1
 
 - Example:
 ```yaml
