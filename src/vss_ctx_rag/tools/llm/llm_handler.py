@@ -90,8 +90,10 @@ class LLMConfig(ToolBaseModel):
     max_completion_tokens: Optional[int] = Field(default=None, ge=1)
     temperature: Optional[float] = Field(default=0.2, ge=0.0, le=2.0)
     top_p: Optional[float] = Field(default=0.7, ge=0.0, le=1.0)
+    presence_penalty: Optional[float] = Field(default=None)
     api_key: Optional[str] = "NOAPIKEYSET"
     reasoning_effort: Optional[str] = Field(default=None)
+    seed: Optional[int] = Field(default=None)
 
 
 class LLMTool(Tool, Runnable):
@@ -166,6 +168,10 @@ class ChatOpenAITool(LLMTool):
             configurable_fields["reasoning_effort"] = ConfigurableField(
                 id="reasoning_effort"
             )
+        if self.config.params.presence_penalty is not None:
+            llm_params["presence_penalty"] = self.config.params.presence_penalty
+        if self.config.params.seed is not None:
+            llm_params["seed"] = self.config.params.seed
 
         if self.config.params.max_completion_tokens is not None:
             llm_params["max_completion_tokens"] = (

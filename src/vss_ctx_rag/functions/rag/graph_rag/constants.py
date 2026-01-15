@@ -31,15 +31,13 @@ CREATE VECTOR INDEX {index_name} IF NOT EXISTS FOR (c:Chunk) ON c.embedding
 """
 DROP_INDEX_QUERY = "DROP INDEX {index_name} IF EXISTS;"
 LABELS_QUERY = "CALL db.labels()"
-FULL_TEXT_QUERY = "CREATE FULLTEXT INDEX {index_name} FOR (n{labels_str}) ON EACH [n.name, n.description];"
-SUBTITLE_SEARCH_FULL_TEXT_QUERY = (
-    "CREATE FULLTEXT INDEX {index_name} FOR (n:Subtitle) ON EACH [n.text];"
-)
+FULL_TEXT_QUERY = "CREATE FULLTEXT INDEX {index_name} IF NOT EXISTS FOR (n{labels_str}) ON EACH [n.name, n.description];"
+SUBTITLE_SEARCH_FULL_TEXT_QUERY = "CREATE FULLTEXT INDEX {index_name} IF NOT EXISTS FOR (n:Subtitle) ON EACH [n.text];"
 FILTER_LABELS = ["Chunk", "Document", "Summary", "Subtitle", "__Community__"]
 
 KEYWORD_SEARCH_INDEX_DROP_QUERY = "DROP INDEX {index_name} IF EXISTS;"
 KEYWORD_SEARCH_FULL_TEXT_QUERY = (
-    "CREATE FULLTEXT INDEX {index_name} FOR (n:Chunk) ON EACH [n.text]"
+    "CREATE FULLTEXT INDEX {index_name} IF NOT EXISTS FOR (n:Chunk) ON EACH [n.text]"
 )
 
 DUPLICATE_SCORE_VALUE = 0.9

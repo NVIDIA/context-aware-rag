@@ -30,6 +30,7 @@ class RerankerConfig(ToolBaseModel):
     model: str = "nvidia/llama-3.2-nv-rerankqa-1b-v2"
     base_url: str = "https://ai.api.nvidia.com/v1/retrieval/nvidia/llama-3_2-nv-rerankqa-1b-v2/reranking"
     api_key: str = "NOAPIKEYSET"
+    top_n: int = 5
 
 
 @register_tool(config=RerankerConfig)
@@ -53,6 +54,7 @@ class NVIDIARerankerTool(Tool):
             model=self.config.params.model,
             api_key=self.config.params.api_key,
             base_url=self.config.params.base_url,
+            top_n=self.config.params.top_n,
         )
 
     def compress_documents(

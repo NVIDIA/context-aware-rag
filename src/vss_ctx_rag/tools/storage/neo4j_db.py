@@ -17,6 +17,8 @@ import asyncio
 import os
 import time
 import traceback
+import uuid as uuid_lib
+from contextlib import contextmanager
 from typing import Any, Dict, List, Tuple, ClassVar, Optional
 
 from langchain.retrievers import ContextualCompressionRetriever
@@ -77,7 +79,9 @@ neo4j_log.setLevel(logging.CRITICAL)
 
 @register_tool_config("neo4j")
 class Neo4jDBConfig(DBConfig):
-    ALLOWED_TOOL_TYPES: ClassVar[Dict[str, List[str]]] = {"embedding": ["embedding"]}
+    ALLOWED_TOOL_TYPES: ClassVar[Dict[str, List[str]]] = {
+        "embedding": ["embedding"],
+    }
 
     traversal_strategy: str = DEFAULT_TRAVERSAL_STRATEGY
     embedding_parallel_count: int = DEFAULT_EMBEDDING_PARALLEL_COUNT
@@ -204,6 +208,114 @@ class Neo4jGraphDB(GraphStorageTool):
         except Exception as e:
             logger.error("Neo4j Query failed %s", str(e))
             return None
+
+    # Distributed lock timeout in seconds
+    INDEX_LOCK_TIMEOUT_SECONDS = 30
+    INDEX_LOCK_MAX_RETRIES = 5
+
+    @contextmanager
+    def _acquire_index_lock(self, lock_name: str = "INDEX_LOCK"):
+        """
+        Acquire a distributed lock using Neo4j for coordinating index operations
+        across multiple processes.
+
+        Uses a dedicated lock node with MERGE + SET to ensure atomic acquisition.
+        The lock automatically expires after INDEX_LOCK_TIMEOUT_SECONDS to prevent
+        deadlocks if a process crashes while holding the lock.
+
+        Args:
+            lock_name: Name of the lock to acquire (default: "INDEX_LOCK")
+
+        Yields:
+            bool: True if lock was acquired successfully
+
+        Raises:
+            RuntimeError: If lock cannot be acquired after all retries
+        """
+        lock_id = str(uuid_lib.uuid4())
+        acquired = False
+        timeout_ms = self.INDEX_LOCK_TIMEOUT_SECONDS * 1000
+
+        try:
+            # Try to acquire lock atomically using MERGE
+            result = self.graph_db.query(
+                """
+                MERGE (lock:__Lock__ {name: $lock_name})
+                ON CREATE SET lock.holder = $lock_id, lock.acquired_at = timestamp()
+                ON MATCH SET lock.holder = CASE
+                    WHEN lock.holder IS NULL OR timestamp() - lock.acquired_at > $timeout_ms
+                    THEN $lock_id
+                    ELSE lock.holder
+                END,
+                lock.acquired_at = CASE
+                    WHEN lock.holder IS NULL OR timestamp() - lock.acquired_at > $timeout_ms
+                    THEN timestamp()
+                    ELSE lock.acquired_at
+                END
+                RETURN lock.holder = $lock_id AS acquired
+                """,
+                params={
+                    "lock_name": lock_name,
+                    "lock_id": lock_id,
+                    "timeout_ms": timeout_ms,
+                },
+            )
+
+            acquired = result and result[0].get("acquired", False)
+
+            if not acquired:
+                # Retry with exponential backoff
+                for attempt in range(self.INDEX_LOCK_MAX_RETRIES):
+                    wait_time = 0.5 * (2**attempt)  # 0.5, 1, 2, 4, 8 seconds
+                    logger.debug(
+                        f"Lock '{lock_name}' held by another process, "
+                        f"retrying in {wait_time}s (attempt {attempt + 1}/{self.INDEX_LOCK_MAX_RETRIES})"
+                    )
+                    time.sleep(wait_time)
+
+                    result = self.graph_db.query(
+                        """
+                        MATCH (lock:__Lock__ {name: $lock_name})
+                        WHERE lock.holder IS NULL OR timestamp() - lock.acquired_at > $timeout_ms
+                        SET lock.holder = $lock_id, lock.acquired_at = timestamp()
+                        RETURN lock.holder = $lock_id AS acquired
+                        """,
+                        params={
+                            "lock_name": lock_name,
+                            "lock_id": lock_id,
+                            "timeout_ms": timeout_ms,
+                        },
+                    )
+                    if result and result[0].get("acquired", False):
+                        acquired = True
+                        logger.debug(
+                            f"Lock '{lock_name}' acquired after {attempt + 1} retries"
+                        )
+                        break
+
+            if not acquired:
+                raise RuntimeError(
+                    f"Could not acquire Neo4j lock '{lock_name}' after "
+                    f"{self.INDEX_LOCK_MAX_RETRIES} retries"
+                )
+
+            logger.debug(f"Lock '{lock_name}' acquired with id {lock_id}")
+            yield acquired
+
+        finally:
+            if acquired:
+                # Release lock
+                try:
+                    self.graph_db.query(
+                        """
+                        MATCH (lock:__Lock__ {name: $lock_name, holder: $lock_id})
+                        SET lock.holder = NULL
+                        """,
+                        params={"lock_name": lock_name, "lock_id": lock_id},
+                    )
+                    logger.debug(f"Lock '{lock_name}' released")
+                except Exception as e:
+                    logger.warning(f"Failed to release lock '{lock_name}': {e}")
 
     def filter_chunks(
         self,
@@ -466,44 +578,48 @@ class Neo4jGraphDB(GraphStorageTool):
 
     def update_knn(self):
         with Metrics("GraphRAG/Neo4j/UpdateKNN", "blue"):
-            try:
-                index_info = self.graph_db.query(
-                    """SHOW INDEXES YIELD name, type, labelsOrTypes
-                       WHERE type = 'VECTOR' AND name = $index_name AND labelsOrTypes = ['Chunk']
-                       RETURN count(*) > 0 AS indexExists""",
-                    params={"index_name": CHUNK_VECTOR_INDEX_NAME},
-                )
-                index_exists = index_info and index_info[0]["indexExists"]
-            except Exception as e:
-                logger.error(
-                    f"Failed to check for vector index '{CHUNK_VECTOR_INDEX_NAME}': {e}"
-                )
-                index_exists = False
+            with self._acquire_index_lock("VECTOR_INDEX_LOCK"):
+                try:
+                    index_info = self.graph_db.query(
+                        """SHOW INDEXES YIELD name, type, labelsOrTypes
+                           WHERE type = 'VECTOR' AND name = $index_name AND labelsOrTypes = ['Chunk']
+                           RETURN count(*) > 0 AS indexExists""",
+                        params={"index_name": CHUNK_VECTOR_INDEX_NAME},
+                    )
+                    index_exists = index_info and index_info[0]["indexExists"]
+                except Exception as e:
+                    logger.error(
+                        f"Failed to check for vector index '{CHUNK_VECTOR_INDEX_NAME}': {e}"
+                    )
+                    index_exists = False
 
-            if not index_exists:
-                logger.warning(
-                    f"Vector index '{CHUNK_VECTOR_INDEX_NAME}' on Chunk(embedding) does not exist. Skipping KNN update."
-                )
-                return
+                if not index_exists:
+                    logger.warning(
+                        f"Vector index '{CHUNK_VECTOR_INDEX_NAME}' on Chunk(embedding) does not exist. Skipping KNN update."
+                    )
+                    return
 
-            knn_min_score = float(os.environ.get("KNN_MIN_SCORE", 0.8))
-            logger.info(
-                f"Updating KNN graph using index '{CHUNK_VECTOR_INDEX_NAME}' with min score {knn_min_score}"
-            )
-            try:
-                self.graph_db.query(
-                    """MATCH (c:Chunk)
-                        WHERE c.embedding IS NOT NULL AND count { (c)-[:SIMILAR]-() } < 5
-                        CALL  db.index.vector.queryNodes('vector', 6, c.embedding) yield node, score
-                        WHERE node <> c and score >= $score MERGE (c)-[rel:SIMILAR]-(node) SET rel.score = score
-                    """,
-                    {"score": float(knn_min_score)},
+                knn_min_score = float(os.environ.get("KNN_MIN_SCORE", 0.8))
+                logger.info(
+                    f"Updating KNN graph using index '{CHUNK_VECTOR_INDEX_NAME}' with min score {knn_min_score}"
                 )
-                logger.info("KNN graph update query executed.")
-            except Exception as e:
-                logger.error(
-                    f"Failed to update KNN graph: {e} {traceback.format_exc()}"
-                )
+                try:
+                    self.graph_db.query(
+                        """MATCH (c:Chunk)
+                            WHERE c.embedding IS NOT NULL AND count { (c)-[:SIMILAR]-() } < 5
+                            CALL  db.index.vector.queryNodes($index_name, 6, c.embedding) yield node, score
+                            WHERE node <> c and score >= $score MERGE (c)-[rel:SIMILAR]-(node) SET rel.score = score
+                        """,
+                        {
+                            "score": float(knn_min_score),
+                            "index_name": CHUNK_VECTOR_INDEX_NAME,
+                        },
+                    )
+                    logger.info("KNN graph update query executed.")
+                except Exception as e:
+                    logger.error(
+                        f"Failed to update KNN graph: {e} {traceback.format_exc()}"
+                    )
 
     def fetch_subtitle_for_embedding(self) -> List[Dict[str, Any]]:
         with Metrics("GraphRAG/Neo4j/fetch_subtitle_for_embedding", "green"):
@@ -636,24 +752,38 @@ class Neo4jGraphDB(GraphStorageTool):
                 logger.error(f"Invalid index type provided: {index_type}")
                 return
 
-            try:
-                logger.info("Starting the process to create vector index.")
+            # Acquire lock to prevent race conditions with other processes
+            with self._acquire_index_lock("VECTOR_INDEX_LOCK"):
                 try:
-                    self.graph_db.query(drop_query)
+                    logger.info("Starting the process to create vector index.")
+                    try:
+                        self.graph_db.query(query)
+                    except Exception as e:
+                        # Check if the error is due to equivalent index already existing
+                        # This is expected behavior - the index we want already exists
+                        if "EquivalentSchemaRuleAlreadyExists" in str(e):
+                            logger.info(
+                                f"Vector index '{index_type}' or equivalent already exists, skipping creation"
+                            )
+                        # If it's a different error, try dropping and recreating
+                        else:
+                            logger.warning(
+                                f"Index creation failed: {e}. Attempting to drop and recreate."
+                            )
+                            try:
+                                self.graph_db.query(drop_query)
+                                self.graph_db.query(query)
+                            except Exception as recreate_error:
+                                logger.error(
+                                    f"Failed to recreate {index_type} vector index: {recreate_error}"
+                                )
+                                return
                 except Exception as e:
-                    logger.error(f"Failed to drop index: {e}")
-                    return
-
-                try:
-                    self.graph_db.query(query)
-                except Exception as e:
-                    logger.error(f"Failed to create {index_type} vector index: {e}")
-                    return
-            except Exception as e:
-                logger.error(
-                    "An error occurred while creating the vector index.", exc_info=True
-                )
-                logger.error(f"Error details: {str(e)}")
+                    logger.error(
+                        "An error occurred while creating the vector index.",
+                        exc_info=True,
+                    )
+                    logger.error(f"Error details: {str(e)}")
 
     def create_vector_fulltext_indexes(self):
         types = ["entities", "keyword", "subtitles"]
@@ -686,8 +816,10 @@ class Neo4jGraphDB(GraphStorageTool):
 
     def create_fulltext(self, index_type):
         with Metrics("GraphRAG/aprocess-doc/create-fulltext:", "red"):
-            try:
+            # Acquire lock to prevent race conditions with other processes
+            with self._acquire_index_lock(f"FULLTEXT_INDEX_LOCK_{index_type}"):
                 try:
+                    # Prepare drop query for potential use later
                     if index_type == "entities":
                         drop_query = DROP_INDEX_QUERY.format(index_name=index_type)
                     elif index_type == "keyword":
@@ -696,31 +828,34 @@ class Neo4jGraphDB(GraphStorageTool):
                         )
                     elif index_type == "subtitles":
                         drop_query = DROP_INDEX_QUERY.format(index_name=index_type)
-                    self.graph_db.query(drop_query)
-                except Exception as e:
-                    logger.error(f"Failed to drop {index_type} index: {e}")
-                    return
-                try:
-                    if index_type == "entities":
-                        result = self.graph_db.query(LABELS_QUERY)
-                        labels = [record["label"] for record in result]
+                    else:
+                        logger.error(f"Unknown index type: {index_type}")
+                        return
 
-                        for label in FILTER_LABELS:
-                            if label in labels:
-                                labels.remove(label)
-                        if labels:
-                            labels_str = ":" + "|".join(
-                                [f"`{label}`" for label in labels]
-                            )
-                        else:
-                            logger.info(
-                                "Full text index is not created as labels are empty"
-                            )
+                    # For entities, we need to fetch labels first
+                    labels_str = None
+                    if index_type == "entities":
+                        try:
+                            result = self.graph_db.query(LABELS_QUERY)
+                            labels = [record["label"] for record in result]
+
+                            for label in FILTER_LABELS:
+                                if label in labels:
+                                    labels.remove(label)
+                            if labels:
+                                labels_str = ":" + "|".join(
+                                    [f"`{label}`" for label in labels]
+                                )
+                            else:
+                                logger.info(
+                                    "Full text index is not created as labels are empty"
+                                )
+                                return
+                        except Exception as e:
+                            logger.error(f"Failed to fetch labels: {e}")
                             return
-                except Exception as e:
-                    logger.error(f"Failed to fetch labels: {e}")
-                    return
-                try:
+
+                    # Build the fulltext query
                     if index_type == "entities":
                         fulltext_query = FULL_TEXT_QUERY.format(
                             index_name=index_type, labels_str=labels_str
@@ -734,12 +869,31 @@ class Neo4jGraphDB(GraphStorageTool):
                             index_name=index_type
                         )
 
-                    self.graph_db.query(fulltext_query)
+                    # Try to create the index first
+                    try:
+                        self.graph_db.query(fulltext_query)
+                    except Exception as e:
+                        # Check if the error is due to equivalent index already existing
+                        # This is expected behavior - the index we want already exists
+                        if "EquivalentSchemaRuleAlreadyExists" in str(e):
+                            logger.info(
+                                f"Full-text index '{index_type}' or equivalent already exists, skipping creation"
+                            )
+                        # If it's a different error, try dropping and recreating
+                        else:
+                            logger.warning(
+                                f"Index creation failed: {e}. Attempting to drop and recreate."
+                            )
+                            try:
+                                self.graph_db.query(drop_query)
+                                self.graph_db.query(fulltext_query)
+                            except Exception as recreate_error:
+                                logger.error(
+                                    f"Failed to recreate {index_type} fulltext index: {recreate_error}"
+                                )
+                                return
                 except Exception as e:
-                    logger.error(f"Failed to create full-text index {index_type}: {e}")
-                    return
-            except Exception as e:
-                logger.error(f"An error occurred during the session: {e}")
+                    logger.error(f"An error occurred during the session: {e}")
 
     async def create_entity_embedding(self):
         rows = []
@@ -828,14 +982,17 @@ class Neo4jGraphDB(GraphStorageTool):
             logger.debug(f"Resetting graph for UUID: {uuid}")
             self.query(QUERY_TO_DELETE_UUID_GRAPH, params={"uuid": uuid})
         else:
-            logger.warning("Deleting all nodes and relationships.")
-            self.query("MATCH (n) DETACH DELETE n")
-            logger.debug("Dropping all indexes.")
-            result = self.query(
-                "SHOW INDEXES YIELD name, type WHERE type IN ['VECTOR', 'FULLTEXT'] RETURN 'DROP INDEX ' + name AS dropCommand;"
-            )
-            for record in result:
-                self.query(record["dropCommand"])
+            # Acquire lock to prevent race conditions with other processes
+            # that may be using or creating indexes
+            with self._acquire_index_lock("VECTOR_INDEX_LOCK"):
+                logger.warning("Deleting all nodes and relationships.")
+                self.query("MATCH (n) DETACH DELETE n")
+                logger.debug("Dropping all indexes.")
+                result = self.query(
+                    "SHOW INDEXES YIELD name, type WHERE type IN ['VECTOR', 'FULLTEXT'] RETURN 'DROP INDEX ' + name AS dropCommand;"
+                )
+                for record in result:
+                    self.query(record["dropCommand"])
 
     def create_neo4j_vector(
         self, multi_channel: bool, retrieval_query: str, index_name: str
@@ -1059,13 +1216,10 @@ class Neo4jGraphDB(GraphStorageTool):
             try:
                 logger.info("Starting to create document retriever chain")
 
-                embeddings_dimension = int(
-                    os.environ.get("CA_RAG_EMBEDDINGS_DIMENSION", 2048)
-                )
                 splitter = RecursiveCharacterTextSplitter(
-                    chunk_size=embeddings_dimension,
-                    chunk_overlap=0,
-                    separators=["\n\n", "\n", "\n-"],
+                    chunk_size=500,
+                    chunk_overlap=10,
+                    separators=["Text:", "\n\n", "\n", "\n-"],
                 )
                 embeddings_filter = EmbeddingsFilter(
                     embeddings=self.embedding,
@@ -1110,11 +1264,11 @@ class Neo4jGraphDB(GraphStorageTool):
                         if "entities" in doc.metadata.keys()
                         else entities
                     )
-
-                    formatted_doc = (
-                        f"Document start\nContent: {doc.page_content}\nDocument end\n"
-                    )
-                    formatted_docs.append(formatted_doc)
+                    if doc.page_content.strip() == "Text:":
+                        continue
+                    else:
+                        formatted_doc = f"Document start\nContent: {doc.page_content.strip()}\nDocument end\n"
+                        formatted_docs.append(formatted_doc)
 
                 except Exception as e:
                     logger.error(f"Error formatting document: {e}")
@@ -1183,7 +1337,6 @@ class Neo4jGraphDB(GraphStorageTool):
                 )
 
                 result = {"sources": list(), "nodedetails": dict(), "entities": dict()}
-                # node_details = {"entitydetails": list()}
                 entities = {"entityids": list(), "relationshipids": list()}
 
                 result["sources"] = sources_and_chunks["sources"]

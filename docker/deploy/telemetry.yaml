@@ -18,7 +18,7 @@ services:
     image: otel/opentelemetry-collector-contrib:latest
     container_name: otel_collector
     volumes:
-      - ${OTEL_COLLECTOR_CONFIG:-${PWD}/configs/otel-collector-config.yml}:/etc/otelcol/otel-collector-config.yml
+      - ${OTEL_COLLECTOR_CONFIG:-${PWD}/docker/configs/otel-collector-config.yml}:/etc/otelcol/otel-collector-config.yml
     command: --config /etc/otelcol/otel-collector-config.yml
     ports:
       - "4318:4318"
@@ -35,7 +35,7 @@ services:
     user: ":"
     volumes:
       - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/volumes_prometheus:/prometheus
-      - ${PROMETHEUS_CONFIG:-${PWD}/configs/prometheus.yml}:/etc/prometheus/prometheus.yml
+      - ${PROMETHEUS_CONFIG:-${PWD}/docker/configs/prometheus.yml}:/etc/prometheus/prometheus.yml
     ports:
       - "9090:9090"
 

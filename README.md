@@ -91,7 +91,7 @@ uv pip install -e .[nat]
 
 ```bash
 uv build
-uv pip install dist/vss_ctx_rag-1.0.0-py3-none-any.whl
+uv pip install dist/vss_ctx_rag-1.0.2-py3-none-any.whl
 ```
 
 ## Service Example
