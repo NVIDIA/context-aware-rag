@@ -338,5 +338,6 @@ We would like to thank the following projects that made Context Aware RAG possib
 - [ArangoDB](https://github.com/arangodb/arangodb)
 - [Elasticsearch](https://github.com/elastic/elasticsearch)
 - [Milvus](https://github.com/milvus-io/milvus)
+- [Qdrant](https://github.com/qdrant/qdrant)
 - [uv](https://github.com/astral-sh/uv)
 - [OpenTelemetry](https://github.com/open-telemetry/opentelemetry-python)
