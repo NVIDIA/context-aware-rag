@@ -27,7 +27,7 @@ jobs:
         run: |
           uv pip install -e ".[docs]" --system
           make -C docs
-      
+
       - name: Disable Jekyll
         run: |
           touch docs/build/html/.nojekyll
