@@ -44,7 +44,7 @@ nim_llm:
 embedders:
 embedding_llm:
     _type: nim
-    model_name: nvidia/llama-3.2-nv-embedqa-1b-v2
+    model_name: nvidia/llama-nemotron-embed-1b-v2
     truncate: "END"
     base_url: "https://integrate.api.nvidia.com/v1"
 
@@ -63,8 +63,8 @@ retrieval_function:
 
     embedding_model_name: embedding_llm
 
-    rerank_model_name: "nvidia/llama-3.2-nv-rerankqa-1b-v2"
-    rerank_model_url: "https://ai.api.nvidia.com/v1/retrieval/nvidia/llama-3_2-nv-rerankqa-1b-v2/reranking"
+    rerank_model_name: "nvidia/llama-nemotron-rerank-1b-v2"
+    rerank_model_url: "https://ai.api.nvidia.com/v1/retrieval/nvidia/llama-nemotron-rerank-1b-v2/reranking"
     rag_type: "vector-rag" # or "graph-rag"
     chat_batch_size: 1
     summ_batch_size: 5
@@ -108,7 +108,7 @@ nim_llm:
 embedders:
 embedding_llm:
     _type: nim
-    model_name: nvidia/llama-3.2-nv-embedqa-1b-v2
+    model_name: nvidia/llama-nemotron-embed-1b-v2
     truncate: "END"
     base_url: "https://integrate.api.nvidia.com/v1"
 
@@ -127,8 +127,8 @@ ingestion_function:
 
     embedding_model_name: embedding_llm
 
-    rerank_model_name: "nvidia/llama-3.2-nv-rerankqa-1b-v2"
-    rerank_model_url: "https://ai.api.nvidia.com/v1/retrieval/nvidia/llama-3_2-nv-rerankqa-1b-v2/reranking"
+    rerank_model_name: "nvidia/llama-nemotron-rerank-1b-v2"
+    rerank_model_url: "https://ai.api.nvidia.com/v1/retrieval/nvidia/llama-nemotron-rerank-1b-v2/reranking"
     rag_type: "vector-rag" # or "graph-rag"
     chat_batch_size: 1
     summ_batch_size: 5

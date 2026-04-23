@@ -34,7 +34,7 @@ summarization:
       temperature: 0.2
       top_p: 0.7
    embedding:
-      model: "nvidia/llama-3.2-nv-embedqa-1b-v2"
+      model: "nvidia/llama-nemotron-embed-1b-v2"
       base_url: "http://localhost:8000/v1"
    params:
       batch_size: 5
@@ -75,10 +75,10 @@ chat:
       temperature: 0.2
       top_p: 0.7
    embedding:
-      model: "nvidia/llama-3.2-nv-embedqa-1b-v2"
+      model: "nvidia/llama-nemotron-embed-1b-v2"
       base_url: "http://localhost:8000/v1"
    reranker:
-      model: "nvidia/llama-3.2-nv-rerankqa-1b-v2"
+      model: "nvidia/llama-nemotron-rerank-1b-v2"
       base_url: "http://localhost:8000/v1"
 ```
 

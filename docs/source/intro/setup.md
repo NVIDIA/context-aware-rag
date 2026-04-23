@@ -101,7 +101,7 @@ summarization:
     temperature: 0.2
     top_p: 0.7
   embedding:
-    model: "nvidia/llama-3.2-nv-embedqa-1b-v2"
+    model: "nvidia/llama-nemotron-embed-1b-v2"
     base_url: https://integrate.api.nvidia.com/v1
   params:
     batch_size: 5
@@ -121,11 +121,11 @@ chat:
     max_tokens: 2048
     temperature: 0.5
   embedding:
-    model: "nvidia/llama-3.2-nv-embedqa-1b-v2"
+    model: "nvidia/llama-nemotron-embed-1b-v2"
     base_url: https://integrate.api.nvidia.com/v1
   reranker:
-    model: "nvidia/llama-3.2-nv-rerankqa-1b-v2"
-    base_url: https://ai.api.nvidia.com/v1/retrieval/nvidia/llama-3_2-nv-rerankqa-1b-v2/reranking
+    model: "nvidia/llama-nemotron-rerank-1b-v2"
+    base_url: https://ai.api.nvidia.com/v1/retrieval/nvidia/llama-nemotron-rerank-1b-v2/reranking
 ```
 
 #### Summarization Configuration Overview

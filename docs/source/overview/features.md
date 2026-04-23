@@ -76,12 +76,12 @@ approaches:
         with their embeddings, are stored in Milvus DB.
     -   Embeddings can be created using any embedding NIM
         -   By default, embeddings are created using
-            [nvidia/llama-3_2-nv-embedqa-1b-v2](https://build.nvidia.com/nvidia/llama-3_2-nv-embedqa-1b-v2).
+            [nvidia/llama-nemotron-embed-1b-v2](https://build.nvidia.com/nvidia/llama-nemotron-embed-1b-v2).
     -   For a query, the top five most similar chunks are retrieved,
         re-ranked using any reranker NIM and passed to a Large Language
         Model (LLM) NIM to generate the final answer.
         -   By default, the reranker NIM is set to
-            [nvidia/llama-3_2-nv-rerankqa-1b-v2](https://build.nvidia.com/nvidia/llama-3_2-nv-rerankqa-1b-v2).
+            [nvidia/llama-nemotron-rerank-1b-v2](https://build.nvidia.com/nvidia/llama-nemotron-rerank-1b-v2).
 -   **GraphRAG**
     -   **Graph Extraction**: Entities and relationships are extracted
         from VLM captions, using an LLM, and stored in a GraphDB.

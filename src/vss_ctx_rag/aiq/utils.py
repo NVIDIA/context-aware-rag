@@ -73,7 +73,7 @@ def aiq_to_vss_config(
             },
             "embedding": {
                 "model": embedder_dict.get(
-                    "model", "nvidia/llama-3.2-nv-embedqa-1b-v2"
+                    "model", "nvidia/llama-nemotron-embed-1b-v2"
                 ),
                 "base_url": embedder_dict.get("base_url", ""),
             },
@@ -103,7 +103,7 @@ def aiq_to_vss_config(
             },
             "embedding": {
                 "model": embedder_dict.get(
-                    "model", "nvidia/llama-3.2-nv-embedqa-1b-v2"
+                    "model", "nvidia/llama-nemotron-embed-1b-v2"
                 ),
                 "base_url": embedder_dict.get(
                     "base_url", "https://integrate.api.nvidia.com/v1"
@@ -141,7 +141,7 @@ def create_vss_ctx_rag_config(name: str):
 
         embedding_model_name: EmbedderRef
 
-        rerank_model_name: str = "nvidia/llama-3.2-nv-rerankqa-1b-v2"
+        rerank_model_name: str = "nvidia/llama-nemotron-rerank-1b-v2"
         rerank_model_url: str = "https://integrate.api.nvidia.com/v1"
         rag_type: str = "vector-rag"  # or "graph-rag"
         chat_batch_size: int = 1

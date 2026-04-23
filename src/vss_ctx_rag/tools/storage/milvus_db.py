@@ -36,10 +36,10 @@ class MilvusDBTool(StorageTool):
         collection_name,
         host="127.0.0.1",
         port="19530",
-        embedding_model_name="nvidia/llama-3.2-nv-embedqa-1b-v2",
+        embedding_model_name="nvidia/llama-nemotron-embed-1b-v2",
         embedding_base_url="https://integrate.api.nvidia.com/v1",
-        reranker_model_name="nvidia/llama-3.2-nv-rerankqa-1b-v2",
-        reranker_base_url="https://ai.api.nvidia.com/v1/retrieval/nvidia/llama-3_2-nv-rerankqa-1b-v2/reranking",
+        reranker_model_name="nvidia/llama-nemotron-rerank-1b-v2",
+        reranker_base_url="https://ai.api.nvidia.com/v1/retrieval/nvidia/llama-nemotron-rerank-1b-v2/reranking",
         name="milvus_db",
     ) -> None:
         super().__init__(name)
