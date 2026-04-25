@@ -80,7 +80,9 @@ openai_llm:
   - `base_url` (str): Endpoint for the embeddings service.
   - `api_key` (str): API key used to authenticate embedding calls.
   - `truncate` (str): How to truncate long inputs (e.g., `END`). Default: `END`
-- Example:
+  - `enable` (bool, optional): If `false`, uses NullEmbedding for testing/development without API calls. Default: `true`
+  - `dimensions` (int, optional): Embedding dimensions when using null embeddings. Default: `1024`
+- Example (NVIDIA embeddings):
 ```yaml
 nvidia_embedding:
   type: embedding
@@ -89,6 +91,15 @@ nvidia_embedding:
     base_url: https://integrate.api.nvidia.com/v1
     api_key: !ENV ${NVIDIA_API_KEY}
 ```
+- Example (Null embeddings for testing):
+```yaml
+null_embedding:
+  type: embedding
+  params:
+    enable: false
+    dimensions: 1024  # optional, defaults to 1024
+```
+**Note**: Null embeddings generate deterministic dummy embeddings without making API calls, useful for testing, development, or when actual embeddings are not needed.
 ##### `reranker`
 - Purpose: Optional re-ranking of retrieved documents by semantic relevance. Also used by NVIDIA RAG blueprint.
 - Parameters (src/vss_ctx_rag/tools/reranker/reranker_tool.py):

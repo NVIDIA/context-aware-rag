@@ -43,6 +43,20 @@ class DBConfig(ToolBaseModel):
     collection_name: Optional[str] = Field(
         default_factory=lambda: "default_" + str(uuid.uuid4()).replace("-", "_")
     )
+    kafka_consumer_settle_secs: Optional[float] = Field(
+        default=5.0,
+        description=(
+            "Seconds the upstream LVS file-summarize path sleeps after the "
+            "RTVI SSE [DONE] event before invoking the aggregator. Allows the "
+            "Kafka -> Logstash -> ES pipeline time to flush raw_events into "
+            "the DB so the aggregator (running with kafka_enabled=true) can "
+            "read them at acall time. Only consulted by LVS when "
+            "summarization.kafka_enabled=true; ctx-rag itself does not "
+            "interpret this value -- the field exists so the YAML key passes "
+            "ToolsConfig validation and is preserved on the parsed config "
+            "dict that LVS reads."
+        ),
+    )
 
 
 class StorageTool(Tool, ABC):
@@ -111,6 +125,21 @@ class StorageTool(Tool, ABC):
 
     @abstractmethod
     async def aget_max_batch_index(self, uuid: str) -> int:
+        pass
+
+    @abstractmethod
+    def retrieve_docs(
+        self, uuid: str, doc_type: str = "raw_events"
+    ) -> List[Dict[str, Any]]:
+        """Retrieve documents from storage filtered by uuid and doc_type.
+
+        Args:
+            uuid: UUID to filter results by
+            doc_type: Document type to filter (default: "raw_events")
+
+        Returns:
+            List of dicts, each containing at least 'text' and flattened metadata.
+        """
         pass
 
     @abstractmethod

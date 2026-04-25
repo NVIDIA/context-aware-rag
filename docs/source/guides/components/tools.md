@@ -150,10 +150,95 @@ tools:
       model: nvidia/llama-3.2-nv-embedqa-1b-v2
       api_key: !ENV ${NVIDIA_API_KEY}
 
+  # Example using null embeddings for testing/development
+  null_embedding:
+    type: embedding
+    params:
+      enable: false          # Disable to use null embeddings (no API calls)
+      dimensions: 1024       # Optional, defaults to 1024
+
 functions:
   my_function:
     type: retrieval_function
     tools:
       custom_tool: my_custom_tool
-      embedding: nvidia_embedding
+      embedding: nvidia_embedding  # Or use null_embedding for testing
+```
+
+## Built-in Tools
+
+### Embedding Tools
+
+The framework provides an `embedding` tool type that supports both real NVIDIA embeddings and null embeddings for testing.
+
+#### NVIDIA Embeddings
+
+Use NVIDIA embeddings for production deployments:
+
+```yaml
+nvidia_embedding:
+  type: embedding
+  params:
+    model: nvidia/llama-3.2-nv-embedqa-1b-v2
+    base_url: https://integrate.api.nvidia.com/v1
+    api_key: !ENV ${NVIDIA_API_KEY}
+    truncate: END
+```
+
+#### Null Embeddings (Testing/Development)
+
+Use null embeddings when you want to test your pipeline without making actual API calls. Null embeddings generate deterministic dummy embeddings that are useful for:
+
+- **Testing**: Run unit tests without API dependencies
+- **Development**: Develop and debug your pipeline offline
+- **Cost Savings**: Avoid API costs during development
+
+```yaml
+test_embedding:
+  type: embedding
+  params:
+    enable: false
+    dimensions: 1024  # Optional, defaults to 1024
+```
+
+**Features:**
+- **No API calls**: Generates embeddings locally without network requests
+- **Deterministic**: Same text always produces the same embedding (reproducible tests)
+- **Fast**: Instant embedding generation
+- **Drop-in replacement**: Uses the same interface as NVIDIA embeddings
+
+**Example in complete configuration:**
+
+```yaml
+tools:
+  # Use null embeddings for testing
+  test_embedding:
+    type: embedding
+    params:
+      enable: false
+      dimensions: 768
+
+  # Use real embeddings for production
+  prod_embedding:
+    type: embedding
+    params:
+      model: nvidia/llama-3.2-nv-embedqa-1b-v2
+      api_key: !ENV ${NVIDIA_API_KEY}
+
+  vector_db:
+    type: milvus
+    params:
+      host: localhost
+      port: 19530
+    tools:
+      embedding: test_embedding  # Switch to prod_embedding for production
+
+functions:
+  vector_retrieval:
+    type: vector_retrieval
+    params:
+      top_k: 10
+    tools:
+      llm: nvidia_llm
+      db: vector_db
 ```

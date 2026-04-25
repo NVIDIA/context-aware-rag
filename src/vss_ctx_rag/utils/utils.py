@@ -24,7 +24,12 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 
 def remove_think_tags(text_in):
+    logger.debug(f"Text in before remove_think_tags: {text_in}")
     text_out = re.sub(r"<think>.*?</think>", "", text_in, flags=re.DOTALL)
+    # in case there are no <think> tags, remove everything before </think>
+    if "<think>" not in text_out and "</think>" in text_out:
+        text_out = re.sub(r".*?</think>", "", text_out, flags=re.DOTALL)
+    logger.debug(f"Text out after remove_think_tags: {text_out}")
     return text_out
 
 

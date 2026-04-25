@@ -78,6 +78,28 @@ class ContextManagerHandler:
 
         self.configure(config)
 
+    @classmethod
+    def create_minimal(
+        cls, config: Dict, process_index: int
+    ) -> "ContextManagerHandler":
+        """Create a minimal handler that can respond to configure commands.
+
+        Used as a fallback when full initialization fails, so the process
+        can still accept reconfiguration requests that retry setup.
+        """
+        handler = cls.__new__(cls)
+        handler._functions = {}
+        handler.tools = {}
+        handler._process_index = process_index
+        handler.auto_indexing = None
+        handler.curr_doc_index = -1
+        handler.storage_tools = {}
+        handler.uuid = config.get("context_manager", {}).get("uuid", None)
+        handler._doc_processing_semaphore = asyncio.Semaphore(
+            DEFAULT_CONCURRENT_DOC_PROCESSING_LIMIT
+        )
+        return handler
+
     def configure(
         self,
         config: Union[Dict, ContextManagerConfig],
@@ -118,6 +140,7 @@ class ContextManagerHandler:
         except Exception as e:
             logger.error(f"Error in configuring context manager handler: {e}")
             logger.error(traceback.format_exc())
+            raise
 
     async def aconfigure_tools(self, config: ContextManagerConfig):
         """Configure tools using the ToolFactory."""

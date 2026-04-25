@@ -19,55 +19,54 @@ requires = ["setuptools >= 64"]
 
 [project]
 name = "vss_ctx_rag"
-version = "1.0.2"
+version = "3.0.0rc3"
 description = ""
 readme = "README.md"
 requires-python = ">=3.12"
 license-files = ["LICENSE", "LICENSE.3rdparty"]
 dependencies = [
   "openai==1.109.1",
-  "langchain_core==0.3.80",
-  "langchain==0.3.27",
-  "langchain_community==0.3.31",
-  "langchain_milvus==0.2.1",
-  "langchain-openai==0.3.35",
-  "langchain-experimental==0.3.4",
-  "langchain-nvidia-ai-endpoints==0.3.19",
-  "pymilvus==2.5.14",
+  "langchain_core>=1.0.1,<2.0.0",
+  "langchain==1.2.15",
+  "langchain-classic>=1.0.3",
+  "langchain_community==0.4.1",
+  "langchain_milvus==0.3.3",
+  "langchain-openai>=1.0.0,<2.0.0",
+  "langchain-experimental==0.4.1",
+  "langchain-nvidia-ai-endpoints==1.2.1",
+  "pymilvus>=2.6.0,<2.7.0",
   "pymilvus-model==0.3.2",
-  "python-multipart==0.0.18",
+  "python-multipart==0.0.26",
   "pydantic==2.12.5",
   "pyyaml==6.0.2",
-  "protobuf==6.33.2",
+  "protobuf>=6.33.5",
   "redis==5.2.1",
-  "unstructured[all-docs]==0.18.21",
-  "uvicorn[standard]==0.32.0",
-  "fastapi==0.115.5",
+  "uvicorn[standard]>=0.35",
+  "fastapi==0.121.2",
   "requests==2.32.5",
   "jsonschema==4.22.0",
   "schema==0.7.8",
-  "json-repair==0.30.2",
+  "json-repair==0.44.1",
   "opentelemetry-sdk==1.39.1",
   "opentelemetry-api==1.39.1",
   "opentelemetry-exporter-otlp-proto-http==1.39.1",
   "opentelemetry-instrumentation-fastapi==0.60b1",
   "nvtx==0.2.11",
   "matplotlib==3.9.4",
-  "torch==2.9.1",
-  "safetensors==0.4.4",
+  "safetensors==0.5.3",
   "minio==7.2.15",
   "pyaml-env==1.2.2",
-  "bleach==6.2.0",
+  "bleach==6.3.0",
   "dataclass-wizard==0.27.0",
-  "pdfplumber==0.11.8",
-  "nvidia-rag==2.2.2",
+  "pdfplumber==0.11.9",
+  "nvidia-rag==2.5.0",
   "openinference-semantic-conventions==0.1.25",
   "openinference-instrumentation-openai==0.1.41",
   "openinference-instrumentation-langchain==0.1.56",
   "neo4j==5.24.0",
-  "fastmcp==2.13.0.2",
-  "langgraph==1.0.1",
-  "langchain-elasticsearch==0.4.0",
+  "fastmcp==3.2.4",
+  "langgraph==1.1.8",
+  "langchain-elasticsearch>=1.0.0,<2.0.0",
   "opencv-python==4.12.0.88",
   "numba==0.61.2",
   "llvmlite==0.44.0",
@@ -96,6 +95,81 @@ include-package-data = true
 managed = true
 config-settings = { editable_mode = "compat" }
 package = true
+# unsafe-best-match: nvidia-rag and langchain ecosystem packages declare
+# conflicting version pins; this lets uv pick the best compatible version
+# instead of failing outright.
+# prerelease=allow: some transitive deps (e.g. opentelemetry) only publish
+# pre-release wheels for the versions we need.
+index-strategy = "unsafe-best-match"
+prerelease = "allow"
+
+# Override upstream strict pins to resolve CVE-affected versions (nSpect bug 6037840).
+# Each entry documents: CVE, which upstream imposes the pin, and when to remove.
+override-dependencies = [
+  # CVE-2024-53981 (DoS via malformed multipart boundary).
+  # nvidia-rag==2.5.0 pins python-multipart<0.0.20. Remove once nvidia-rag>=2.6.
+  "python-multipart>=0.0.26",
+  # CVE-2024-24762 (ReDoS in Content-Type parsing).
+  # langchain/nvidia-rag pin fastapi<0.116. Remove once they support 0.121+.
+  "fastapi>=0.121.2",
+  # CVE-2025-68664 (serialization injection) + CVE-2025-65106 (template injection).
+  # nSpect guidance: long-term fix is 1.2.15. Remove once langchain pins are relaxed.
+  "langchain>=1.2.15",
+  # CVE-2024-52530 (markup injection). unstructured pins bleach<6.2.
+  # Remove once unstructured>=0.19.
+  "bleach>=6.3.0",
+  # CVE-2024-36401 (arbitrary code exec via crafted tensor).
+  # transformers pins safetensors<0.5. Remove once transformers>=4.58.
+  "safetensors>=0.5.3",
+  # CVE-2025-0110 (code injection via crafted JSON).
+  # nvidia-rag pins json-repair<0.40. Remove once nvidia-rag>=2.6.
+  "json-repair>=0.44.1",
+  # CVE-2024-3772 (ReDoS in email validation).
+  # langchain ecosystem pins pydantic<2.11. Remove once langchain>=1.3.
+  "pydantic>=2.12.5",
+]
+# Constrain transitive deps to CVE-safe minimums (nSpect bug 6037840).
+# These are not direct deps — pulled in transitively.
+# Each entry documents: CVE, transitive path, and when to remove.
+constraint-dependencies = [
+  # CVE-2024-11392 (unsafe deserialization). Via nvidia-rag/unstructured.
+  # Remove once nvidia-rag or unstructured pull transformers>=4.57.6.
+  "transformers>=4.57.6",
+  # CVE-2024-12797 (X.509 verification bypass). Via Authlib/minio/urllib3.
+  # Remove once Authlib/minio upgrade their cryptography pin.
+  "cryptography>=46.0.7",
+  # CVE-2024-39705 (arbitrary code exec via data download). Via unstructured.
+  # Remove once unstructured pulls nltk>=3.9.4.
+  "nltk>=3.9.4",
+  # CVE-2025-0938 (buffer overflow in image decode). Via unstructured/pdfplumber.
+  # Remove once unstructured or pdfplumber pull Pillow>=12.2.0.
+  "Pillow>=12.2.0",
+  # CVE-2024-55945 (PKCE bypass) + BDSA-2026-7419. Via minio.
+  # Updated to >=1.7.0 for BDSA-2026-7419 (nSpect NSPECT-P1VD-WUVY). Remove once minio pulls Authlib>=1.7.0.
+  "Authlib>=1.7.0",
+  # CVE-2024-56737 (path traversal). Via keyring/importlib.
+  # Remove once keyring pulls jaraco-context>=6.1.2.
+  "jaraco-context>=6.1.2",
+  # CVE-2025-21503 (ReDoS in syntax highlighting). Via nbconvert/IPython.
+  # Remove once nbconvert pulls Pygments>=2.20.0.
+  "Pygments>=2.20.0",
+  # CVE-2025-47272 (XSS in notebook output). Via unstructured.
+  # Remove once unstructured pulls nbconvert>=7.17.1.
+  "nbconvert>=7.17.1",
+  # CVE-2026-34444 (arbitrary code exec via Lua sandbox escape). Previously transitive via
+  # fakeredis[lua]/fastmcp 2.x; removed from lock with fastmcp 3.x upgrade. Safety pin in
+  # case lupa is re-introduced. Remove once no transitive puller requires lupa<2.8.
+  "lupa>=2.8",
+  # CVE-2025-64439 (RCE in JsonPlusSerializer). Via langgraph-checkpoint.
+  # langgraph-api is not a transitive dep of langgraph 1.1.8; constraint is a safety
+  # pin for if langgraph-api is added directly or pulled in future upgrades.
+  "langgraph-api>=0.5",
+]
+
+[[tool.uv.index]]
+name = "nvidia"
+url = "https://pypi.nvidia.com/"
+explicit = false
 
 [tool.uv.sources]
 vss_ctx_rag_arango = { workspace = true }
@@ -112,7 +186,8 @@ docs = [
   "sphinx-autoapi>=3.6",
   "vale==3.9.5",
   "setuptools-scm>=8.1.0",
-  "sphinxcontrib-mermaid>=1.0.0"
+  "sphinxcontrib-mermaid>=1.0.0",
+  "tinycss2>=1.2.1",
 ]
 
 arango = ["vss_ctx_rag_arango"]

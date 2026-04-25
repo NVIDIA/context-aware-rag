@@ -15,20 +15,9 @@
 
 import importlib
 import inspect
-from typing import (
-    List,
-    Optional,
-    Union,
-    Any,
-    Dict,
-    Type,
-    TypeVar,
-    Generic,
-    ClassVar,
-)
+from typing import Any, ClassVar, Dict, Generic, List, Optional, Type, TypeVar, Union
 
-from pydantic import BaseModel, Field, model_validator, RootModel
-
+from pydantic import BaseModel, Field, RootModel, model_validator
 
 _TOOL_CONFIG_REGISTRY: Dict[str, Dict[str, str]] = {}
 _TOOL_IMPLEMENTATION_REGISTRY: Dict[str, Dict[str, str]] = {}
@@ -195,7 +184,13 @@ class ToolsConfig(BaseModel):
                             and "collection_name" in config_class.model_fields
                         )
                         if has_collection_name:
-                            new_collection_name = f"default_{context_uuid}"
+                            # Override collection_name with a deterministic name
+                            # derived from the request UUID so that the Kafka producer,
+                            # MilvusDBTool, and ElasticsearchDBTool all share the same
+                            # collection/index for a given request.
+                            new_collection_name = f"default_{context_uuid}".replace(
+                                "-", "_"
+                            )
                             params_data["collection_name"] = new_collection_name
 
                     validated_params = config_class(**params_data)

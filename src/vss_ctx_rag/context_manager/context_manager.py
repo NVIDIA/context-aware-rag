@@ -56,6 +56,7 @@ class ContextManagerProcess(mp_ctx.Process):
         self._response_queue = mp_ctx.Queue()
         self._configure_queue = mp_ctx.Queue()
         self._reset_queue = mp_ctx.Queue()
+        self._drop_collection_queue = mp_ctx.Queue()
         self._stop = mp_ctx.Event()
         self._pending_add_doc_requests = []
         self._request_start_times = {}
@@ -102,7 +103,17 @@ class ContextManagerProcess(mp_ctx.Process):
                 exporter_type=exporter_type,
                 endpoint=endpoint,
             )
-        self.cm_handler = ContextManagerHandler(self.config, self.process_index)
+        try:
+            self.cm_handler = ContextManagerHandler(self.config, self.process_index)
+        except Exception as e:
+            logger.error(
+                f"Initial configuration failed for process {self.process_index}: {e}"
+            )
+            # Create a minimal handler so the process can still respond to
+            # configure commands (which will retry the setup).
+            self.cm_handler = ContextManagerHandler.create_minimal(
+                self.config, self.process_index
+            )
         self._init_done_event.set()
 
     def start_bg_loop(self) -> None:
@@ -303,6 +314,52 @@ class ContextManagerProcess(mp_ctx.Process):
                                     )
                                     self._configure_queue.put({"error": str(e)})
 
+                    elif item and "drop_collection" in item:
+                        # Drop the collection/index for every storage tool
+                        # registered with this context manager. Used by
+                        # via-engine on /files DELETE and stream removal when
+                        # KAFKA_ENABLED=true so Logstash-written documents
+                        # are wiped along with the asset.
+                        try:
+                            dropped = []
+                            errors = []
+                            for tool_type in ("storage", "vector_db"):
+                                tools_by_name = self.cm_handler.tools.get(tool_type, {})
+                                for tool_name, tool in tools_by_name.items():
+                                    drop_fn = getattr(tool, "drop_collection", None)
+                                    if not callable(drop_fn):
+                                        continue
+                                    try:
+                                        drop_fn()
+                                        dropped.append(f"{tool_type}/{tool_name}")
+                                        logger.info(
+                                            f"Process Index: {self.process_index} - "
+                                            f"Dropped collection on {tool_type}/{tool_name}"
+                                        )
+                                    except Exception as drop_ex:
+                                        errors.append(
+                                            f"{tool_type}/{tool_name}: {drop_ex}"
+                                        )
+                                        logger.warning(
+                                            f"Process Index: {self.process_index} - "
+                                            f"Failed to drop collection on "
+                                            f"{tool_type}/{tool_name}: {drop_ex}"
+                                        )
+                            if errors and not dropped:
+                                self._drop_collection_queue.put(
+                                    {"error": "; ".join(errors)}
+                                )
+                            else:
+                                self._drop_collection_queue.put(
+                                    {"success": "true", "dropped": dropped}
+                                )
+                        except Exception as e:
+                            logger.error(
+                                f"Process Index: {self.process_index} - "
+                                f"Error dropping collections: {e}"
+                            )
+                            self._drop_collection_queue.put({"error": str(e)})
+
         except Exception as e:
             logger.error(f"Process Index: {self.process_index} - Exception in run: {e}")
             logger.error(traceback.format_exc())
@@ -393,6 +450,21 @@ class ContextManagerProcess(mp_ctx.Process):
                 f"Process Index: {self.process_index} - Error configuring context manager process: {e}"
             )
             return {"error": f"Error configuring context manager process: {e}"}
+
+    def drop_collection(self) -> dict:
+        """Drop every storage tool's collection/index. Idempotent on 404."""
+        try:
+            self._queue.put({"drop_collection": {}})
+            output = self._drop_collection_queue.get(timeout=self.timeout)
+            if isinstance(output, dict) and "error" in output:
+                raise Exception(output["error"])
+            return output
+        except Exception as e:
+            logger.error(
+                f"Process Index: {self.process_index} - "
+                f"Error dropping collection: {e}"
+            )
+            return {"error": f"Error dropping collection: {e}"}
 
     def call(self, state):
         try:
@@ -501,6 +573,18 @@ class ContextManager:
             f"Process Index: {self._process_index} - context manager - configure output: {output}"
         )
         return output
+
+    def drop_collection(self) -> dict:
+        """Drop every storage tool's collection/index for this context.
+
+        Used by via-engine on `/files` DELETE and live-stream removal when
+        ``KAFKA_ENABLED=true`` to wipe Logstash-written documents along
+        with the asset. Idempotent: missing index returns success.
+        """
+        logger.debug(
+            f"Process Index: {self._process_index} - context manager - drop_collection"
+        )
+        return self.process.drop_collection()
 
     def call(self, state):
         logger.debug(f"Process Index: {self._process_index} - context manager - call")

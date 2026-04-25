@@ -13,36 +13,28 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import hashlib
 import os
 import traceback
-from typing import List, Tuple, ClassVar, Optional, Any
+from typing import Any, ClassVar, Dict, List, Optional, Tuple, override
 
 import nx_arangodb as nxadb
-from arango import ArangoClient
 from adbnx_adapter import ADBNX_Adapter, ADBNX_Controller_Full_Cycle
-from typing import Dict
-import hashlib
-
 from adbnx_adapter.typings import NxData, NxId
-
+from arango import ArangoClient
 from langchain_arangodb import ArangoVector
 from langchain_core.runnables import chain
+from vss_ctx_rag.plugins.arango.networkx_db import NetworkXGraphDB
 
-from vss_ctx_rag.functions.rag.graph_rag.constants import (
-    get_retrieval_query,
-)
-from vss_ctx_rag.plugins.arango.networkx_db import (
-    NetworkXGraphDB,
-)
+from vss_ctx_rag.functions.rag.graph_rag.constants import get_retrieval_query
+from vss_ctx_rag.models.tool_models import register_tool, register_tool_config
+from vss_ctx_rag.tools.storage.storage_tool import DBConfig
 from vss_ctx_rag.utils.ctx_rag_logger import Metrics, logger
 from vss_ctx_rag.utils.globals import (
     DEFAULT_EMBEDDING_DIMENSION,
     DEFAULT_TRAVERSAL_STRATEGY,
     GNN_TRAVERSAL_STRATEGY,
 )
-from vss_ctx_rag.models.tool_models import register_tool_config, register_tool
-from vss_ctx_rag.tools.storage.storage_tool import DBConfig
-from typing import override
 
 
 @register_tool_config("arango")
@@ -402,6 +394,34 @@ class ArangoGraphDB(NetworkXGraphDB):
                         },
                     }
                 )
+
+    def retrieve_docs(
+        self, uuid: str, doc_type: str = "raw_events"
+    ) -> List[Dict[str, Any]]:
+        aql = """
+            FOR s IN @@collection
+                FILTER s.doc_type == @doc_type AND s.uuid == @uuid
+                SORT s.chunkIdx ASC
+                RETURN {
+                    text: s.text,
+                    doc_type: s.doc_type,
+                    uuid: s.uuid,
+                    chunkIdx: s.chunkIdx,
+                    camera_id: s.camera_id,
+                    event_count: s.event_count
+                }
+        """
+        params = {
+            "@collection": self.community_collection,
+            "doc_type": doc_type,
+            "uuid": uuid,
+        }
+        try:
+            result = self.query(aql, params)
+            return result if result else []
+        except Exception as e:
+            logger.warning(f"Error retrieving docs: {e}")
+            return []
 
     def query(self, query: str, params: dict) -> list:
         """

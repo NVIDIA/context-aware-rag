@@ -21,6 +21,17 @@ from .config import SummarizationConfig
 # Import summarization modules
 from . import batch
 from . import offline_batch
+from . import vlm_structured
+from . import vlm_structured_online
 from . import summary_retriever
+from . import structured_inference
 
-__all__ = ["batch", "offline_batch", "SummarizationConfig", "summary_retriever"]
+__all__ = [
+    "batch",
+    "offline_batch",
+    "vlm_structured",
+    "vlm_structured_online",
+    "SummarizationConfig",
+    "summary_retriever",
+    "structured_inference",
+]

@@ -34,7 +34,7 @@ USER root
 
 WORKDIR /app
 
-COPY pyproject.toml README.md LICENSE LICENSE.3rdparty /app/
+COPY pyproject.toml README.md LICENSE LICENSE.3rdparty uv.lock /app/
 
 COPY src/ /app/src/
 COPY service/ /app/service/
@@ -45,13 +45,9 @@ COPY packages/ /app/packages/
 RUN mkdir -p /app/logs/
 RUN touch /app/logs/vss_ctx_rag.log
 
-RUN uv build --all-packages \
-    && uv pip install dist/*.whl --system
+ENV UV_PROJECT_ENVIRONMENT="/usr/local/"
 
-RUN ln -sf /usr/local/lib/python3.12/site-packages/nvidia/cuda_runtime/lib/libcudart.so.12 /usr/local/lib/python3.12/site-packages/nvidia/cuda_runtime/lib/libcudart.so
-
-ENV LD_LIBRARY_PATH=/usr/local/lib/python3.12/site-packages/nvidia/cuda_runtime/lib
-ENV LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib/python3.12/site-packages/nvidia/cuda_nvrtc/lib/
+RUN uv sync --locked --all-packages
 
 RUN chown -R 1000:1000 /app /home/appuser
 

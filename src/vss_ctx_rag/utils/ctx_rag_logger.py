@@ -15,6 +15,7 @@
 
 import logging
 import os
+import re
 import time
 import json
 
@@ -80,27 +81,38 @@ class SecureLogFilter(logging.Filter):
     # Environment variable names whose values should never appear in logs
     _SENSITIVE_ENV_VARS = [
         "NVIDIA_API_KEY",
-        "OPEN_API_KEY",
         "OPENAI_API_KEY",
+        "NGC_API_KEY",
         "NGC_CLI_KEY",
         "NGC_CLI_API_KEY",
         "GRAPH_DB_PASSWORD",
         "GRAPH_DB_USERNAME",
         "ARANGO_DB_PASSWORD",
         "ARANGO_DB_USERNAME",
+        "MINIO_PASSWORD",
+        "MINIO_USERNAME",
+    ]
+
+    _API_KEY_PATTERNS = [
+        re.compile(r"nvapi-[A-Za-z0-9_-]+"),  # NVIDIA API keys
+        re.compile(r"sk-[A-Za-z0-9_-]+"),  # OpenAI API keys
     ]
 
     def __init__(self):
         super().__init__()
 
+    @staticmethod
+    def mask_api_key_patterns(msg: str) -> str:
+        """Mask strings matching API key patterns (nvapi-..., sk-...)."""
+        masked = msg
+        for pattern in SecureLogFilter._API_KEY_PATTERNS:
+            masked = pattern.sub("***MASKED***", masked)
+        return masked
+
     def filter(self, record):
         current_secrets = [
             os.getenv(var) for var in self._SENSITIVE_ENV_VARS if os.getenv(var)
         ]
-
-        if not current_secrets:
-            # No secrets set, nothing to scrub
-            return True
 
         full_msg = record.getMessage()
         masked_msg = full_msg
@@ -108,7 +120,10 @@ class SecureLogFilter(logging.Filter):
             if secret and secret in masked_msg:
                 masked_msg = masked_msg.replace(secret, "***MASKED***")
 
-        # If we replaced anything, overwrite the record so downstream formatters cannot recover the secret
+        masked_msg = self.mask_api_key_patterns(masked_msg)
+
+        # If we replaced anything, overwrite the record
+        # so downstream formatters cannot recover the secret
         if masked_msg != full_msg:
             record.msg = masked_msg
             record.args = ()

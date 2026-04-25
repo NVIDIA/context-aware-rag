@@ -27,7 +27,7 @@ from vss_ctx_rag.utils.ctx_rag_logger import Metrics
 from vss_ctx_rag.tools.storage.storage_tool import StorageTool
 from langchain_core.prompts import ChatPromptTemplate
 from vss_ctx_rag.utils.globals import LLM_TOOL_NAME
-from langchain.chains.combine_documents import create_stuff_documents_chain
+from langchain_classic.chains.combine_documents import create_stuff_documents_chain
 from vss_ctx_rag.models.function_models import (
     FunctionModel,
 )

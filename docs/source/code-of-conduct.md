@@ -16,4 +16,5 @@ limitations under the License.
 -->
 
 # Code of Conduct
-This project has adopted the [Contributor Covenant Code of Conduct](https://docs.rapids.ai/resources/conduct/).
+
+Refer to the [Contributor Covenant Code of Conduct](https://github.com/NVIDIA/context-aware-rag/blob/main/CODE-OF-CONDUCT.md).

@@ -21,12 +21,12 @@ import uuid as uuid_lib
 from contextlib import contextmanager
 from typing import Any, Dict, List, Tuple, ClassVar, Optional
 
-from langchain.retrievers import ContextualCompressionRetriever
-from langchain.retrievers.document_compressors import (
+from langchain_classic.retrievers import ContextualCompressionRetriever
+from langchain_classic.retrievers.document_compressors import (
     DocumentCompressorPipeline,
     EmbeddingsFilter,
 )
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.graphs import Neo4jGraph
 from langchain_community.graphs.graph_document import GraphDocument
 from langchain_community.vectorstores import Neo4jVector
@@ -461,6 +461,37 @@ class Neo4jGraphDB(GraphStorageTool):
             query = "MATCH (s:Summary) RETURN max(s.batch_i)"
         result = await self.aquery(query)
         return result[0]["max(s.batch_i)"]
+
+    def retrieve_docs(
+        self, uuid: str, doc_type: str = "raw_events"
+    ) -> List[Dict[str, Any]]:
+        try:
+            cypher = (
+                "MATCH (s:Summary) "
+                "WHERE s.doc_type = $doc_type AND s.uuid = $uuid "
+                "RETURN s ORDER BY s.chunkIdx ASC"
+            )
+            results = self.query(cypher, {"doc_type": doc_type, "uuid": uuid})
+            if not results:
+                return []
+
+            docs = []
+            for record in results:
+                node = record["s"]
+                docs.append(
+                    {
+                        "text": node.get("content", ""),
+                        "doc_type": node.get("doc_type", ""),
+                        "uuid": node.get("uuid", ""),
+                        "chunkIdx": node.get("chunkIdx", 0),
+                        "camera_id": node.get("camera_id", "default"),
+                        "event_count": node.get("event_count", 0),
+                    }
+                )
+            return docs
+        except Exception as e:
+            logger.warning(f"Error retrieving docs: {e}")
+            return []
 
     def add_summary(self, summary: str, metadata: dict):
         """Add a batch summary to the Neo4j database as a Summary node with metadata."""

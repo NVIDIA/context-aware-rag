@@ -22,8 +22,8 @@ from pathlib import Path
 from re import compile
 from typing import Optional
 
-from langchain.retrievers import ContextualCompressionRetriever
-from langchain.retrievers.document_compressors import DocumentCompressorPipeline
+from langchain_classic.retrievers import ContextualCompressionRetriever
+from langchain_classic.retrievers.document_compressors import DocumentCompressorPipeline
 from langchain_core.output_parsers import StrOutputParser
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 

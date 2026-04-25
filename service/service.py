@@ -296,8 +296,20 @@ async def summary_endpoint(summary_model: SummaryModel):
             f"UUID {summary_model.uuid}: Summary request: {summary_model.model_dump()}"
         )
         result = ctx_mgr.call(summary_model.model_dump(exclude={"uuid"}))
+        if "error" in result:
+            logger.error(
+                f"UUID {summary_model.uuid}: Summary failed with error: {result['error']}"
+            )
+            return {"status": "error", "result": result}
+        summarization = result.get("summarization", {})
+        if summarization.get("error_code"):
+            logger.error(
+                f"UUID {summary_model.uuid}: Summary failed with "
+                f"error_code: {summarization['error_code']}"
+            )
+            return {"status": "error", "result": result}
         logger.info(f"UUID {summary_model.uuid}: Summary completed successfully")
-        return {"status": "success", "result": result["summarization"]["result"]}
+        return {"status": "success", "result": summarization.get("result")}
     except Exception as e:
         traceback.print_exc()
         print(e)
@@ -468,8 +480,12 @@ mcp_server = FastMCP(name="CA-RAG retrieval MCP Server")
 
 class CheckContextManagerMiddleware(Middleware):
     async def __call__(self, context: MiddlewareContext, call_next):
-        # Check if UUID is provided in the arguments
-        arguments = context.request.params.get("arguments", {})
+        # Only validate UUID for tool calls; other MCP methods (initialize, ping, etc.) pass through
+        if context.method != "tools/call":
+            return await call_next(context)
+
+        # fastmcp 3.x: context.message is CallToolRequestParams with .arguments dict
+        arguments = getattr(context.message, "arguments", None) or {}
         uuid = arguments.get("uuid")
 
         if not uuid:
@@ -604,9 +620,7 @@ def summary_retriever(
 
 mcp_server.add_middleware(CheckContextManagerMiddleware())
 mcp_app = mcp_server.http_app(path="/mcp")
-app = FastAPI(
-    title="Context Aware RAG Service", lifespan=mcp_app.router.lifespan_context
-)
+app = FastAPI(title="Context Aware RAG Service", lifespan=mcp_app.lifespan)
 
 
 app.include_router(common_router)

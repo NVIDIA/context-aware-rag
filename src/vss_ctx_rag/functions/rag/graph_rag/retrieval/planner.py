@@ -233,19 +233,21 @@ Evaluate these results and determine if you need more information or if you can 
         }
 
     # TOOL EXECUTION NODE
-    async def tool_node_with_logging(state: AgentState):
+    async def tool_node_with_logging(state: AgentState, config: RunnableConfig):
         last_message = state["messages"][-1]
 
         if hasattr(last_message, "tool_calls") and last_message.tool_calls:
             tool_node = ToolNode(tool_list)
+            # Merge custom configurable keys into the graph-provided config
+            # so that langgraph's internal runtime keys are preserved.
+            merged_config = config.copy() if config else {}
+            configurable = merged_config.get("configurable", {})
+            configurable["chunk_size"] = state["chunk_size"]
+            configurable["is_subtitle"] = state["is_subtitle"]
+            merged_config["configurable"] = configurable
             result = await tool_node.ainvoke(
                 state,
-                config=RunnableConfig(
-                    configurable={
-                        "chunk_size": state["chunk_size"],
-                        "is_subtitle": state["is_subtitle"],
-                    }
-                ),
+                config=merged_config,
             )
 
             # Log and collect results

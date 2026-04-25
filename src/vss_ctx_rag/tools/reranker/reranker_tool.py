@@ -16,7 +16,7 @@
 from typing import List
 
 from langchain_nvidia_ai_endpoints import NVIDIARerank
-from langchain.schema import Document
+from langchain_core.documents import Document
 from vss_ctx_rag.base.tool import Tool
 from vss_ctx_rag.models.tool_models import (
     register_tool_config,

@@ -15,8 +15,6 @@
 
 """Import all arango plugin modules to trigger registration decorators."""
 
-from . import arango_db
-from . import networkx_db
-
+from . import arango_db, networkx_db
 
 __all__ = ["arango_db", "networkx_db"]
