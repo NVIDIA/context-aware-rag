@@ -605,23 +605,28 @@ class ElasticsearchDBTool(VectorStorageTool):
 
             es_client.delete_by_query(index=self.index_name, body=query)
         except Exception as e:
-            logger.warning(f"Error dropping data: {e}")
+            if hasattr(e, "status_code") and e.status_code == 404:
+                logger.debug("Index '%s' already deleted", self.index_name)
+            else:
+                logger.warning(f"Error dropping data: {e}")
 
     def drop_collection(self):
+        """Delete the Elasticsearch index backing this tool.
+
+        Idempotent on a missing index (ES returns 404 / 400 are ignored).
+        The cached ``_vector_store`` reference is intentionally NOT
+        recreated here: langchain's ``ElasticsearchStore`` constructor
+        bootstraps the index with its mapping on initialisation, which
+        leaves a 0-doc index behind that still consumes a shard against
+        ``cluster.max_shards_per_node``. The existing wrapper's
+        underlying ES client remains valid and can be reused
+        for subsequent writes — langchain auto-creates the index lazily
+        on the next ``add_documents`` call, picking up the visionllm
+        template's mapping declared by ``_ensure_index_template``.
+        """
         try:
             es_client = self._vector_store.client
             es_client.indices.delete(index=self.index_name, ignore=[400, 404])
-
-            # Recreate the vector store
-            self._vector_store = ElasticsearchStore(
-                index_name=self.index_name,
-                embedding=self.embedding,
-                es_url=self.es_url,
-                strategy=ElasticsearchStore.ApproxRetrievalStrategy(
-                    hybrid=True, rrf=False
-                ),
-                distance_strategy="COSINE",
-            )
         except Exception as e:
             logger.warning(f"Error dropping collection: {e}")
 

@@ -23,8 +23,10 @@ batch storage, and result building.
 import json
 import os
 import re
+import time
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Union
 
 import json_repair
 
@@ -33,7 +35,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables.base import RunnableSequence
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from schema import Schema
 
 from vss_ctx_rag.base.function import Function
@@ -90,6 +92,36 @@ class VlmStructuredParamsBase(BaseModel):
     )
 
 
+# ── Timestamp parsing ───────────────────────────────────────────────────
+
+
+def _parse_timestamp(value: Union[int, float, str]) -> float:
+    """Coerce a timestamp to float seconds.
+
+    Accepts:
+      - Numeric values (int / float) — returned as-is.
+      - Numeric strings (e.g. ``"123.45"``) — converted via ``float()``.
+      - ISO 8601 strings (e.g. ``"2025-01-15T10:30:00Z"``) — parsed and
+        converted to a POSIX / epoch-seconds float.
+    """
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            pass
+        normalized = value.replace("Z", "+00:00") if value.endswith("Z") else value
+        try:
+            dt = datetime.fromisoformat(normalized)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.timestamp()
+        except ValueError:
+            raise ValueError(f"Cannot parse timestamp: {value!r}")
+    raise TypeError(f"Expected numeric or ISO timestamp, got {type(value).__name__}")
+
+
 # ── Event model ─────────────────────────────────────────────────────────
 
 
@@ -101,6 +133,11 @@ class Event(BaseModel):
     type: str
     description: str
     uuid: Optional[str] = None
+
+    @field_validator("start_time", "end_time", mode="before")
+    @classmethod
+    def _coerce_timestamp(cls, v: Union[int, float, str]) -> float:
+        return _parse_timestamp(v)
 
     def overlaps_with(
         self,
@@ -147,7 +184,7 @@ class VlmStructuredBase(Function):
     config: dict
     db: StorageTool
     call_schema: Schema = Schema({}, ignore_extra_keys=True)
-    metrics = SummaryMetrics()
+    metrics: SummaryMetrics
     uuids: List[str]
 
     time_overlap_threshold: float
@@ -168,6 +205,7 @@ class VlmStructuredBase(Function):
 
     def setup(self):
         self.db = self.get_tool("db")
+        self.metrics = SummaryMetrics()
 
         self.time_overlap_threshold = self.get_param(
             "time_overlap_threshold", default=0.1
@@ -178,8 +216,14 @@ class VlmStructuredBase(Function):
         self.max_events_per_batch = self.get_param("max_events_per_batch", default=50)
         self.enable_llm_merging = self.get_param("enable_llm_merging", default=False)
         self.kafka_enabled = self.get_param("kafka_enabled", default=False)
-        self.filter_start_time = self.get_param("start_time", default=None)
-        self.filter_end_time = self.get_param("end_time", default=None)
+        _raw_start = self.get_param("start_time", default=None)
+        _raw_end = self.get_param("end_time", default=None)
+        self.filter_start_time = (
+            _parse_timestamp(_raw_start) if _raw_start is not None else None
+        )
+        self.filter_end_time = (
+            _parse_timestamp(_raw_end) if _raw_end is not None else None
+        )
 
         self.log_dir = os.environ.get("VIA_LOG_DIR", None)
         self.summary_start_time = None
@@ -277,8 +321,27 @@ class VlmStructuredBase(Function):
         return content.strip().replace("\\n", "\n").replace('\\"', '"')
 
     @classmethod
-    def _parse_json_document(cls, doc: str) -> List[Event]:
-        """Parse a JSON document and return a list of Event objects."""
+    def _parse_json_document(
+        cls,
+        doc: str,
+        doc_meta: Optional[dict] = None,
+    ) -> List[Event]:
+        """Parse a JSON document and return a list of Event objects.
+
+        Parameters
+        ----------
+        doc:
+            Raw JSON (or VLM-wrapped JSON) text.
+        doc_meta:
+            Optional chunk metadata dict (from ``ChunkInfo``).  When
+            provided, ``_chunk_boundaries`` extracts the chunk's time
+            window.  Events with ``start_time >= end_time`` are rescued
+            using those boundaries when they form a valid (positive-
+            duration) window; otherwise the event is dropped.
+        """
+        chunk_start_time, chunk_end_time = (
+            cls._chunk_boundaries(doc_meta) if doc_meta else (None, None)
+        )
         try:
             json_content = cls._extract_json_from_vlm_response(doc)
             with Metrics("VlmStructured/ParseJSONDocument", "green"):
@@ -291,25 +354,72 @@ class VlmStructuredBase(Function):
                 logger.warning(f"Expected events list, got {type(events_data)}")
                 return []
 
-            events = []
+            drop_empty = os.environ.get(
+                "LVS_DROP_EMPTY_EVENT_FIELDS", "true"
+            ).lower() in ("true", "1", "yes", "on")
+
+            valid_events: List[Event] = []
+            deferred_events: List[Event] = []
+
             for event_data in events_data:
                 try:
                     event = Event(**event_data)
+
+                    if drop_empty:
+                        ev_type = (event.type or "").strip()
+                        ev_desc = (event.description or "").strip()
+                        if not ev_type or not ev_desc:
+                            logger.warning(
+                                "Dropping event with empty field(s) "
+                                "(type=%r, description=%r): %s",
+                                event.type,
+                                event.description,
+                                event_data,
+                            )
+                            continue
+
                     if event.start_time >= event.end_time:
+                        deferred_events.append(event)
+                    else:
+                        valid_events.append(event)
+                except Exception as e:
+                    logger.warning(f"Skipping invalid event {event_data}: {e}")
+
+            if deferred_events:
+                for event in deferred_events:
+                    # Replace VLM-emitted zero-duration timestamps with the
+                    # authoritative chunk boundaries from content_metadata:
+                    #   - live stream → start_ntp_float / end_ntp_float
+                    #   - file        → start_pts / end_pts
+                    # (selected by ``_chunk_boundaries``).  Events are dropped
+                    # only when no chunk boundaries are available at all (e.g.
+                    # legacy in-memory path with empty ``doc_meta``).
+                    if chunk_start_time is not None and chunk_end_time is not None:
                         logger.warning(
-                            "Dropping zero/negative-duration event "
+                            "Adjusting zero/negative-duration event "
+                            "(start_time=%.3f, end_time=%.3f) to chunk "
+                            "boundaries (%.3f, %.3f): %s",
+                            event.start_time,
+                            event.end_time,
+                            chunk_start_time,
+                            chunk_end_time,
+                            event.description,
+                        )
+                        event.start_time = chunk_start_time
+                        event.end_time = chunk_end_time
+                        valid_events.append(event)
+                    else:
+                        logger.warning(
+                            "Dropping zero/negative-duration event — no chunk "
+                            "boundaries in content_metadata "
                             "(start_time=%.3f, end_time=%.3f): %s",
                             event.start_time,
                             event.end_time,
                             event.description,
                         )
-                        continue
-                    events.append(event)
-                except Exception as e:
-                    logger.warning(f"Skipping invalid event {event_data}: {e}")
 
-            logger.info(f"Parsed {len(events)} events from JSON document")
-            return events
+            logger.info(f"Parsed {len(valid_events)} events from JSON document")
+            return valid_events
 
         except Exception as e:
             logger.warning(f"Failed to parse JSON document: {e}")
@@ -348,6 +458,8 @@ class VlmStructuredBase(Function):
                         f"Completion Tokens: {cb.completion_tokens}, "
                         f"Total Cost (USD): ${cb.total_cost}"
                     )
+                    self.metrics.summary_tokens += cb.total_tokens
+                    self.metrics.summary_requests += cb.successful_requests
                 return (
                     merged_description.strip()
                     if isinstance(merged_description, str)
@@ -447,17 +559,23 @@ class VlmStructuredBase(Function):
     @staticmethod
     def _filter_events_by_time(
         events: List[Event],
-        start_time: Optional[float] = None,
-        end_time: Optional[float] = None,
+        start_time: Optional[Union[float, str]] = None,
+        end_time: Optional[Union[float, str]] = None,
     ) -> List[Event]:
         """Return only events that overlap the ``[start_time, end_time]`` window.
 
         An event is kept when its time span intersects the filter window, i.e.
         ``event.end_time >= start_time`` and ``event.start_time <= end_time``.
         If both bounds are *None* the original list is returned unchanged.
+
+        *start_time* and *end_time* accept numeric values **or** ISO 8601
+        strings; they are coerced to ``float`` epoch-seconds before comparison.
         """
         if start_time is None and end_time is None:
             return events
+
+        start_time = _parse_timestamp(start_time) if start_time is not None else None
+        end_time = _parse_timestamp(end_time) if end_time is not None else None
 
         filtered = []
         for event in events:
@@ -570,6 +688,7 @@ class VlmStructuredBase(Function):
         input_text = "\n\n".join(events_text)
         logger.info(f"Aggregating {len(merged_events)} events with LLM")
 
+        agg_start_time = time.time()
         with Metrics("VlmStructured/LLMAggregation", "cyan"):
             with get_openai_callback() as cb:
                 aggregated_summary = await call_token_safe(
@@ -586,6 +705,7 @@ class VlmStructuredBase(Function):
                     f"Successful Requests: {cb.successful_requests}, "
                     f"Total Cost (USD): ${cb.total_cost}"
                 )
+        self.metrics.aggregation_latency = time.time() - agg_start_time
 
         return aggregated_summary
 
@@ -655,7 +775,30 @@ class VlmStructuredBase(Function):
 
         return state
 
-    # ── Doc ingestion helper ────────────────────────────────────────────
+    # ── Doc ingestion helpers ───────────────────────────────────────────
+
+    @staticmethod
+    def _chunk_boundaries(doc_meta: dict) -> tuple[float, float]:
+        """
+        Extract ``(chunk_start_time, chunk_end_time)`` in seconds from *doc_meta*.
+
+        Two metadata shapes are supported, depending on stream type:
+
+        - **Live stream summarization** — RTVI populates absolute NTP wall
+          clock fields on the proto message; Logstash mirrors them as
+          ``start_ntp_float`` / ``end_ntp_float`` (float epoch-seconds).
+          Used for live because ``start_pts`` is unreliable for RTSP streams
+          (PTS rolls over per GStreamer pipeline restart).
+
+        - **File summarization** — chunk boundaries come from the video
+          container's PTS (``start_pts`` / ``end_pts`` in nanoseconds, relative
+          to the asset's ``creation_time``). Returned as seconds-from-creation.
+        """
+        if "start_ntp_float" in doc_meta and "end_ntp_float" in doc_meta:
+            return float(doc_meta["start_ntp_float"]), float(doc_meta["end_ntp_float"])
+        if "start_pts" in doc_meta and "end_pts" in doc_meta:
+            return doc_meta["start_pts"] / 1e9, doc_meta["end_pts"] / 1e9
+        return None, None
 
     def _store_raw_events(
         self, events: List[Event], doc_i: int, doc_meta: dict

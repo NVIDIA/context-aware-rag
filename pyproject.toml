@@ -19,7 +19,7 @@ requires = ["setuptools >= 64"]
 
 [project]
 name = "vss_ctx_rag"
-version = "3.0.0rc3"
+version = "3.0.0rc7"
 description = ""
 readme = "README.md"
 requires-python = ">=3.12"
@@ -156,6 +156,11 @@ constraint-dependencies = [
   # CVE-2025-47272 (XSS in notebook output). Via unstructured.
   # Remove once unstructured pulls nbconvert>=7.17.1.
   "nbconvert>=7.17.1",
+  # BDSA-2025-15435 / CVE-2025-64439 (RCE in JsonPlusSerializer).
+  # Via langgraph==1.1.8 -> langgraph-prebuilt==1.0.10.
+  # nSpect guidance: long-term fix is 1.0.11. Exact pin avoids alpha selection
+  # under prerelease=allow. Remove once langgraph pulls langgraph-prebuilt>=1.0.11.
+  "langgraph-prebuilt==1.0.11",
   # CVE-2026-34444 (arbitrary code exec via Lua sandbox escape). Previously transitive via
   # fakeredis[lua]/fastmcp 2.x; removed from lock with fastmcp 3.x upgrade. Safety pin in
   # case lupa is re-introduced. Remove once no transitive puller requires lupa<2.8.

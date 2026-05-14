@@ -24,7 +24,7 @@ include = ["vss_ctx_rag.*"]
 
 [project]
 name = "vss_ctx_rag_nat"
-version = "3.0.0rc3"
+version = "3.0.0rc7"
 dependencies = [
     "vss_ctx_rag"
 ]

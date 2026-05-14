@@ -97,7 +97,7 @@ class VlmStructuredSummarization(VlmStructuredBase):
             doc_meta.setdefault("is_last", False)
 
             with Metrics("StructuredBatchSumm/aprocess_doc", "red") as bs:
-                events = self._parse_json_document(doc)
+                events = self._parse_json_document(doc, doc_meta)
 
                 if events:
                     logger.info(f"Extracted {len(events)} events from document {doc_i}")

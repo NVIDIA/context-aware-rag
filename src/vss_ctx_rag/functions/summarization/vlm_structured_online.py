@@ -72,7 +72,12 @@ class VlmStructuredOnlineSummarization(VlmStructuredBase):
                 text = doc.get("text", "")
                 if not text:
                     continue
-                events = self._parse_json_document(text)
+                # ``retrieve_docs`` returns a flattened dict: ``content_metadata``
+                # fields (start_ntp_float, end_ntp_float, start_pts, end_pts,
+                # chunkIdx, ...) are hoisted to the top level alongside ``text``.
+                # The whole dict (minus ``text``) IS the chunk metadata.
+                doc_meta = {k: v for k, v in doc.items() if k != "text"}
+                events = self._parse_json_document(text, doc_meta)
                 if multi:
                     for event in events:
                         event.uuid = uuid
@@ -122,7 +127,7 @@ class VlmStructuredOnlineSummarization(VlmStructuredBase):
             doc_meta.setdefault("is_last", False)
 
             with Metrics("StructuredOnlineSumm/aprocess_doc", "red") as bs:
-                events = self._parse_json_document(doc)
+                events = self._parse_json_document(doc, doc_meta)
 
                 if events:
                     logger.info(f"Extracted {len(events)} events from document {doc_i}")
