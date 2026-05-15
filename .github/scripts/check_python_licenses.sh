@@ -17,6 +17,12 @@ uv sync --frozen --no-default-groups --quiet
 uv pip install --quiet pip-licenses
 
 # docutils is multi-licensed (BSD/PSF/Public Domain/GPL); we use it under BSD/PSF.
+# We do not import docutils directly in our code, we get it from these open source projects:
+# - https://github.com/executablebooks/MyST-Parser/blob/master/LICENSE (MIT)
+# - https://github.com/sphinx-doc/sphinx/blob/master/LICENSE.rst (BSD-2-Clause)
+# - https://github.com/spatialaudio/nbsphinx/blob/master/LICENSE (MIT)
+# - https://github.com/pydata/pydata-sphinx-theme/blob/main/LICENSE (BSD-3-Clause)
+# - https://github.com/wasi-master/rich-rst/blob/main/LICENSE (MIT)
 DISALLOWED=$(uv run --no-sync --quiet pip-licenses --format=csv \
   | grep -iE 'GPL|AGPL|SSPL|BUSL' \
   | grep -v 'LGPL' \
