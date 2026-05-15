@@ -92,12 +92,19 @@ class VlmStructuredSummarization(VlmStructuredBase):
     async def aprocess_doc(self, doc: str, doc_i: int, doc_meta: dict):
         """Parse events from *doc*, accumulate in memory, and persist raw events to DB."""
         try:
+            if doc_meta.get("doc_type") == "event_list":
+                self._store_event_list(doc, doc_i, doc_meta)
+                return
             logger.info("Processing structured doc %d for processing", doc_i)
             doc_meta.setdefault("is_first", False)
             doc_meta.setdefault("is_last", False)
 
             with Metrics("StructuredBatchSumm/aprocess_doc", "red") as bs:
-                events = self._parse_json_document(doc)
+                events, needs_type = self._parse_json_document(doc, doc_meta)
+                if needs_type:
+                    uuid = doc_meta.get("uuid", self.uuids[0] if self.uuids else "")
+                    inferred = await self._infer_event_types(needs_type, uuid=uuid)
+                    events.extend(inferred)
 
                 if events:
                     logger.info(f"Extracted {len(events)} events from document {doc_i}")

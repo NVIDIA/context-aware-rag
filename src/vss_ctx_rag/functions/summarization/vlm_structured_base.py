@@ -20,11 +20,14 @@ VLM structured summarization functions: Event parsing, merging, LLM aggregation,
 batch storage, and result building.
 """
 
+import asyncio
 import json
 import os
 import re
+import time
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple, Union
 
 import json_repair
 
@@ -33,7 +36,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables.base import RunnableSequence
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from schema import Schema
 
 from vss_ctx_rag.base.function import Function
@@ -90,6 +93,36 @@ class VlmStructuredParamsBase(BaseModel):
     )
 
 
+# ── Timestamp parsing ───────────────────────────────────────────────────
+
+
+def _parse_timestamp(value: Union[int, float, str]) -> float:
+    """Coerce a timestamp to float seconds.
+
+    Accepts:
+      - Numeric values (int / float) — returned as-is.
+      - Numeric strings (e.g. ``"123.45"``) — converted via ``float()``.
+      - ISO 8601 strings (e.g. ``"2025-01-15T10:30:00Z"``) — parsed and
+        converted to a POSIX / epoch-seconds float.
+    """
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            pass
+        normalized = value.replace("Z", "+00:00") if value.endswith("Z") else value
+        try:
+            dt = datetime.fromisoformat(normalized)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.timestamp()
+        except ValueError:
+            raise ValueError(f"Cannot parse timestamp: {value!r}")
+    raise TypeError(f"Expected numeric or ISO timestamp, got {type(value).__name__}")
+
+
 # ── Event model ─────────────────────────────────────────────────────────
 
 
@@ -101,6 +134,11 @@ class Event(BaseModel):
     type: str
     description: str
     uuid: Optional[str] = None
+
+    @field_validator("start_time", "end_time", mode="before")
+    @classmethod
+    def _coerce_timestamp(cls, v: Union[int, float, str]) -> float:
+        return _parse_timestamp(v)
 
     def overlaps_with(
         self,
@@ -147,7 +185,7 @@ class VlmStructuredBase(Function):
     config: dict
     db: StorageTool
     call_schema: Schema = Schema({}, ignore_extra_keys=True)
-    metrics = SummaryMetrics()
+    metrics: SummaryMetrics
     uuids: List[str]
 
     time_overlap_threshold: float
@@ -168,6 +206,7 @@ class VlmStructuredBase(Function):
 
     def setup(self):
         self.db = self.get_tool("db")
+        self.metrics = SummaryMetrics()
 
         self.time_overlap_threshold = self.get_param(
             "time_overlap_threshold", default=0.1
@@ -178,8 +217,14 @@ class VlmStructuredBase(Function):
         self.max_events_per_batch = self.get_param("max_events_per_batch", default=50)
         self.enable_llm_merging = self.get_param("enable_llm_merging", default=False)
         self.kafka_enabled = self.get_param("kafka_enabled", default=False)
-        self.filter_start_time = self.get_param("start_time", default=None)
-        self.filter_end_time = self.get_param("end_time", default=None)
+        _raw_start = self.get_param("start_time", default=None)
+        _raw_end = self.get_param("end_time", default=None)
+        self.filter_start_time = (
+            _parse_timestamp(_raw_start) if _raw_start is not None else None
+        )
+        self.filter_end_time = (
+            _parse_timestamp(_raw_end) if _raw_end is not None else None
+        )
 
         self.log_dir = os.environ.get("VIA_LOG_DIR", None)
         self.summary_start_time = None
@@ -277,8 +322,36 @@ class VlmStructuredBase(Function):
         return content.strip().replace("\\n", "\n").replace('\\"', '"')
 
     @classmethod
-    def _parse_json_document(cls, doc: str) -> List[Event]:
-        """Parse a JSON document and return a list of Event objects."""
+    def _parse_json_document(
+        cls,
+        doc: str,
+        doc_meta: Optional[dict] = None,
+    ) -> Tuple[List[Event], List[Event]]:
+        """Parse a JSON document and return validated events plus untyped events.
+
+        Returns
+        -------
+        (events, needs_type_inference)
+            *events* are ready to use.  *needs_type_inference* contains
+            events that have a valid description but an empty/missing type
+            (only populated when ``LVS_DROP_EMPTY_EVENT_FIELDS`` is
+            enabled).  Callers should pass the second list through
+            ``_infer_event_types`` to attempt LLM-based classification.
+
+        Parameters
+        ----------
+        doc:
+            Raw JSON (or VLM-wrapped JSON) text.
+        doc_meta:
+            Optional chunk metadata dict (from ``ChunkInfo``).  When
+            provided, ``_chunk_boundaries`` extracts the chunk's time
+            window.  Events with ``start_time >= end_time`` are rescued
+            using those boundaries when they form a valid (positive-
+            duration) window; otherwise the event is dropped.
+        """
+        chunk_start_time, chunk_end_time = (
+            cls._chunk_boundaries(doc_meta) if doc_meta else (None, None)
+        )
         try:
             json_content = cls._extract_json_from_vlm_response(doc)
             with Metrics("VlmStructured/ParseJSONDocument", "green"):
@@ -289,31 +362,211 @@ class VlmStructuredBase(Function):
             events_data = data.get("events", []) if isinstance(data, dict) else data
             if not isinstance(events_data, list):
                 logger.warning(f"Expected events list, got {type(events_data)}")
-                return []
+                return [], []
 
-            events = []
+            drop_empty = os.environ.get(
+                "LVS_DROP_EMPTY_EVENT_FIELDS", "true"
+            ).lower() in ("true", "1", "yes", "on")
+
+            valid_events: List[Event] = []
+            deferred_events: List[Event] = []
+            needs_type_inference: List[Event] = []
+
             for event_data in events_data:
                 try:
                     event = Event(**event_data)
+
+                    if drop_empty:
+                        ev_type = (event.type or "").strip()
+                        ev_desc = (event.description or "").strip()
+                        if not ev_desc:
+                            logger.warning(
+                                "Dropping event with empty description "
+                                "(type=%r, description=%r): %s",
+                                event.type,
+                                event.description,
+                                event_data,
+                            )
+                            continue
+                        if not ev_type:
+                            needs_type_inference.append(event)
+                            continue
+
                     if event.start_time >= event.end_time:
+                        deferred_events.append(event)
+                    else:
+                        valid_events.append(event)
+                except Exception as e:
+                    logger.warning(f"Skipping invalid event {event_data}: {e}")
+
+            if deferred_events:
+                for event in deferred_events:
+                    # Replace VLM-emitted zero-duration timestamps with the
+                    # authoritative chunk boundaries from content_metadata:
+                    #   - live stream → start_ntp_float / end_ntp_float
+                    #   - file        → start_pts / end_pts
+                    # (selected by ``_chunk_boundaries``).  Events are dropped
+                    # only when no chunk boundaries are available at all (e.g.
+                    # legacy in-memory path with empty ``doc_meta``).
+                    if chunk_start_time is not None and chunk_end_time is not None:
                         logger.warning(
-                            "Dropping zero/negative-duration event "
+                            "Adjusting zero/negative-duration event "
+                            "(start_time=%.3f, end_time=%.3f) to chunk "
+                            "boundaries (%.3f, %.3f): %s",
+                            event.start_time,
+                            event.end_time,
+                            chunk_start_time,
+                            chunk_end_time,
+                            event.description,
+                        )
+                        event.start_time = chunk_start_time
+                        event.end_time = chunk_end_time
+                        valid_events.append(event)
+                    else:
+                        logger.warning(
+                            "Dropping zero/negative-duration event — no chunk "
+                            "boundaries in content_metadata "
                             "(start_time=%.3f, end_time=%.3f): %s",
                             event.start_time,
                             event.end_time,
                             event.description,
                         )
-                        continue
-                    events.append(event)
-                except Exception as e:
-                    logger.warning(f"Skipping invalid event {event_data}: {e}")
 
-            logger.info(f"Parsed {len(events)} events from JSON document")
-            return events
+            logger.info(
+                f"Parsed {len(valid_events)} events from JSON document "
+                f"({len(needs_type_inference)} need type inference)"
+            )
+            return valid_events, needs_type_inference
 
         except Exception as e:
             logger.warning(f"Failed to parse JSON document: {e}")
+            return [], []
+
+    # ── Event-list persistence ─────────────────────────────────────────
+
+    def _store_event_list(self, doc: str, doc_i: int, doc_meta: dict) -> None:
+        """Persist an ``event_list`` document to the DB.
+
+        This must be called during ``aprocess_doc`` so that
+        ``_get_known_event_types`` can retrieve the list later when
+        performing LLM-based type inference.
+        """
+        meta = {
+            "chunkIdx": doc_meta.get("chunkIdx", doc_i),
+            "batch_i": doc_meta.get("batch_i", doc_i),
+            "doc_type": "event_list",
+            "uuid": doc_meta.get("uuid", self.uuids[0]),
+            "camera_id": doc_meta.get("camera_id", "default"),
+        }
+        with Metrics("VlmStructured/StoreEventList", "green"):
+            self.db.add_summary(summary=doc, metadata=meta)
+        logger.info("Stored event_list document for uuid=%s", meta["uuid"])
+
+    # ── LLM type inference ──────────────────────────────────────────────
+
+    def _get_known_event_types(self, uuid: str) -> List[str]:
+        """Retrieve known event types from the event_list document in the DB."""
+        try:
+            docs = self.db.retrieve_docs(uuid=uuid, doc_type="event_list")
+            if not docs:
+                logger.debug("No event_list document found for uuid=%s", uuid)
+                return []
+            text = docs[0].get("text", "")
+            if not text:
+                return []
+            data = json.loads(text)
+            events_list = data.get("events", [])
+            known_types = sorted(
+                {
+                    (e["type"] if isinstance(e, dict) else e)
+                    for e in events_list
+                    if (isinstance(e, dict) and e.get("type"))
+                    or (isinstance(e, str) and e.strip())
+                }
+            )
+            if known_types:
+                logger.info(
+                    "Retrieved %d known event types for uuid=%s: %s",
+                    len(known_types),
+                    uuid,
+                    known_types,
+                )
+            return known_types
+        except Exception as e:
+            logger.warning(
+                "Failed to retrieve known event types for uuid=%s: %s",
+                uuid,
+                e,
+            )
             return []
+
+    async def _infer_event_types(
+        self,
+        events: List[Event],
+        uuid: str = "",
+    ) -> List[Event]:
+        """Use LLM to assign a type to events that have a description but no type.
+        If *uuid* is provided, the ``event_list`` document is fetched from
+        the DB to supply the LLM with known event types for that stream.
+        All events are sent to the LLM concurrently via ``asyncio.gather``.
+        Returns only the events for which a non-empty type was successfully
+        inferred. Events that cannot be typed are logged and discarded.
+        """
+        if not events:
+            return []
+
+        known_types = self._get_known_event_types(uuid) if uuid else []
+
+        if known_types:
+            types_str = ", ".join(f"'{t}'" for t in known_types)
+            type_guidance = (
+                f"The following event types are known for this stream: "
+                f"{types_str}.\n"
+                "Pick the most appropriate type from this list and only from this list\n\n"
+            )
+        else:
+            type_guidance = ""
+
+        async def _infer_single(event: Event) -> Optional[Event]:
+            prompt = (
+                "You are classifying a video event. Given the description below, "
+                "reply with ONLY a short event type label (1-3 words). "
+                "Do not include any other text.\n\n"
+                f"{type_guidance}"
+                f"Description: {event.description}"
+            )
+            try:
+                with Metrics("VlmStructured/InferEventType", "yellow"):
+                    response = await self.llm.ainvoke(prompt)
+                t = remove_think_tags(response.content).strip().strip("\"'")
+                if t:
+                    event.type = t
+                    logger.info("Inferred type %r for event: %s", t, event.description)
+                    return event
+                logger.warning(
+                    "LLM returned empty type for event, dropping: %s",
+                    event.description,
+                )
+            except Exception as e:
+                logger.warning(
+                    "LLM type inference failed for event, dropping: %s — %s",
+                    event.description,
+                    e,
+                )
+            return None
+
+        with Metrics("VlmStructured/InferEventTypes", "yellow"):
+            with get_openai_callback() as cb:
+                results = await asyncio.gather(*(_infer_single(e) for e in events))
+                logger.info(
+                    f"InferEventTypes - Total Tokens: {cb.total_tokens}, "
+                    f"Prompt Tokens: {cb.prompt_tokens}, "
+                    f"Completion Tokens: {cb.completion_tokens}, "
+                    f"Total Cost (USD): ${cb.total_cost}"
+                )
+                self.metrics.summary_tokens += cb.total_tokens
+                self.metrics.summary_requests += cb.successful_requests
+        return [e for e in results if e is not None]
 
     # ── Merging ─────────────────────────────────────────────────────────
 
@@ -348,6 +601,8 @@ class VlmStructuredBase(Function):
                         f"Completion Tokens: {cb.completion_tokens}, "
                         f"Total Cost (USD): ${cb.total_cost}"
                     )
+                    self.metrics.summary_tokens += cb.total_tokens
+                    self.metrics.summary_requests += cb.successful_requests
                 return (
                     merged_description.strip()
                     if isinstance(merged_description, str)
@@ -447,17 +702,23 @@ class VlmStructuredBase(Function):
     @staticmethod
     def _filter_events_by_time(
         events: List[Event],
-        start_time: Optional[float] = None,
-        end_time: Optional[float] = None,
+        start_time: Optional[Union[float, str]] = None,
+        end_time: Optional[Union[float, str]] = None,
     ) -> List[Event]:
         """Return only events that overlap the ``[start_time, end_time]`` window.
 
         An event is kept when its time span intersects the filter window, i.e.
         ``event.end_time >= start_time`` and ``event.start_time <= end_time``.
         If both bounds are *None* the original list is returned unchanged.
+
+        *start_time* and *end_time* accept numeric values **or** ISO 8601
+        strings; they are coerced to ``float`` epoch-seconds before comparison.
         """
         if start_time is None and end_time is None:
             return events
+
+        start_time = _parse_timestamp(start_time) if start_time is not None else None
+        end_time = _parse_timestamp(end_time) if end_time is not None else None
 
         filtered = []
         for event in events:
@@ -570,6 +831,7 @@ class VlmStructuredBase(Function):
         input_text = "\n\n".join(events_text)
         logger.info(f"Aggregating {len(merged_events)} events with LLM")
 
+        agg_start_time = time.time()
         with Metrics("VlmStructured/LLMAggregation", "cyan"):
             with get_openai_callback() as cb:
                 aggregated_summary = await call_token_safe(
@@ -586,6 +848,7 @@ class VlmStructuredBase(Function):
                     f"Successful Requests: {cb.successful_requests}, "
                     f"Total Cost (USD): ${cb.total_cost}"
                 )
+        self.metrics.aggregation_latency = time.time() - agg_start_time
 
         return aggregated_summary
 
@@ -655,7 +918,30 @@ class VlmStructuredBase(Function):
 
         return state
 
-    # ── Doc ingestion helper ────────────────────────────────────────────
+    # ── Doc ingestion helpers ───────────────────────────────────────────
+
+    @staticmethod
+    def _chunk_boundaries(doc_meta: dict) -> tuple[float, float]:
+        """
+        Extract ``(chunk_start_time, chunk_end_time)`` in seconds from *doc_meta*.
+
+        Two metadata shapes are supported, depending on stream type:
+
+        - **Live stream summarization** — RTVI populates absolute NTP wall
+          clock fields on the proto message; Logstash mirrors them as
+          ``start_ntp_float`` / ``end_ntp_float`` (float epoch-seconds).
+          Used for live because ``start_pts`` is unreliable for RTSP streams
+          (PTS rolls over per GStreamer pipeline restart).
+
+        - **File summarization** — chunk boundaries come from the video
+          container's PTS (``start_pts`` / ``end_pts`` in nanoseconds, relative
+          to the asset's ``creation_time``). Returned as seconds-from-creation.
+        """
+        if "start_ntp_float" in doc_meta and "end_ntp_float" in doc_meta:
+            return float(doc_meta["start_ntp_float"]), float(doc_meta["end_ntp_float"])
+        if "start_pts" in doc_meta and "end_pts" in doc_meta:
+            return doc_meta["start_pts"] / 1e9, doc_meta["end_pts"] / 1e9
+        return None, None
 
     def _store_raw_events(
         self, events: List[Event], doc_i: int, doc_meta: dict

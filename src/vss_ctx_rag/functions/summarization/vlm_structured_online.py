@@ -53,7 +53,7 @@ class VlmStructuredOnlineSummarization(VlmStructuredBase):
 
     # ── DB retrieval ────────────────────────────────────────────────────
 
-    def _fetch_events_from_db(self, uuids: List[str]) -> List[Event]:
+    async def _fetch_events_from_db(self, uuids: List[str]) -> List[Event]:
         """Retrieve raw event documents from the database and parse into Event objects.
 
         When *uuids* contains more than one entry, each parsed ``Event``
@@ -72,7 +72,11 @@ class VlmStructuredOnlineSummarization(VlmStructuredBase):
                 text = doc.get("text", "")
                 if not text:
                     continue
-                events = self._parse_json_document(text)
+                doc_meta = {k: v for k, v in doc.items() if k != "text"}
+                events, needs_type = self._parse_json_document(text, doc_meta)
+                if needs_type:
+                    inferred = await self._infer_event_types(needs_type, uuid=uuid)
+                    events.extend(inferred)
                 if multi:
                     for event in events:
                         event.uuid = uuid
@@ -97,7 +101,7 @@ class VlmStructuredOnlineSummarization(VlmStructuredBase):
             self.call_schema.validate(state)
 
             uuids = self._resolve_uuids(state)
-            events = self._fetch_events_from_db(uuids)
+            events = await self._fetch_events_from_db(uuids)
 
             start_time = state.get("start_time", self.filter_start_time)
             end_time = state.get("end_time", self.filter_end_time)
@@ -117,12 +121,19 @@ class VlmStructuredOnlineSummarization(VlmStructuredBase):
     async def aprocess_doc(self, doc: str, doc_i: int, doc_meta: dict):
         """Parse and store raw events to DB (no in-memory accumulation)."""
         try:
+            if doc_meta.get("doc_type") == "event_list":
+                self._store_event_list(doc, doc_i, doc_meta)
+                return
             logger.info("Processing structured doc %d for online storage", doc_i)
             doc_meta.setdefault("is_first", False)
             doc_meta.setdefault("is_last", False)
 
             with Metrics("StructuredOnlineSumm/aprocess_doc", "red") as bs:
-                events = self._parse_json_document(doc)
+                events, needs_type = self._parse_json_document(doc, doc_meta)
+                if needs_type:
+                    uuid = doc_meta.get("uuid", self.uuids[0] if self.uuids else "")
+                    inferred = await self._infer_event_types(needs_type, uuid=uuid)
+                    events.extend(inferred)
 
                 if events:
                     logger.info(f"Extracted {len(events)} events from document {doc_i}")

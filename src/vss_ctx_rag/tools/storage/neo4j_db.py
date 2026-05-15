@@ -1136,6 +1136,30 @@ class Neo4jGraphDB(GraphStorageTool):
                 vector_db = config["vector_creator"](
                     multi_channel, retrieval_query, index_name
                 )
+
+                # TODO: Upgrade to langchain-neo4j package
+                # Neo4j vector index can intermittently return None scores
+                # (e.g. due to eventual consistency after ingestion). Filter
+                # them out before langchain's validation check which cannot
+                # handle None in comparisons like `score < 0.0`.
+                _original_search = vector_db.similarity_search_with_score_by_vector
+
+                def _safe_search_with_score(*args, **kwargs):
+                    results = _original_search(*args, **kwargs)
+                    filtered = [
+                        (doc, score) for doc, score in results if score is not None
+                    ]
+                    if len(filtered) < len(results):
+                        logger.warning(
+                            f"Filtered out {len(results) - len(filtered)} "
+                            "result(s) with None similarity scores"
+                        )
+                    return filtered
+
+                vector_db.similarity_search_with_score_by_vector = (
+                    _safe_search_with_score
+                )
+
                 search_k = top_k or config["default_k"]
                 # Build base search kwargs
                 search_kwargs = {

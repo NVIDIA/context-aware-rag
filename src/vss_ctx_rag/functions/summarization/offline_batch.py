@@ -71,11 +71,12 @@ class OfflineBatchSummarization(Function):
     call_schema: Schema = Schema(
         {"start_index": int, "end_index": int}, ignore_extra_keys=True
     )
-    metrics = SummaryMetrics()
+    metrics: SummaryMetrics
     uuid: str
     batch_summaries: Dict[int, str]
 
     def setup(self):
+        self.metrics = SummaryMetrics()
         # fixed params
         prompts = self.get_param("prompts")
         self.batch_prompt = ChatPromptTemplate.from_messages(
