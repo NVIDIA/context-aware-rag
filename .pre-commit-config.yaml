@@ -48,3 +48,32 @@ repos:
         entry: trufflehog git file://. --since-commit HEAD --results=verified,unknown --fail
         language: golang
         stages: [pre-commit]
+
+  - id: mypy
+    name: mypy (agent)
+    entry: bash -c 'cd services/agent && uv run mypy src/vss_agents/'
+    language: system
+    types: [python]
+    pass_filenames: false
+    require_serial: true
+
+  - id: dco-signoff
+    name: DCO sign-off check
+    entry: bash -c 'grep -q "^Signed-off-by" "$1" || { echo "ERROR - Commit missing DCO sign-off. Use git commit -s"; exit 1; }' --
+    language: system
+    stages: [commit-msg]
+
+  - id: copyright-headers
+    name: SPDX copyright headers
+    entry: python3 .github/scripts/check_copyright_headers.py
+    language: system
+    pass_filenames: false
+    stages: [pre-commit]
+
+  - id: license-check-python
+    name: License Check (Python deps)
+    entry: bash .github/scripts/check_python_licenses.sh
+    language: system
+    files: ^(pyproject\.toml|packages/.+/pyproject\.toml|uv\.lock)$
+    pass_filenames: false
+    stages: [pre-commit]
