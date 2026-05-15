@@ -1307,7 +1307,9 @@ class ArangoGraphDB(NetworkXGraphDB):
 
     def fetch_subtitle_for_embedding(self) -> List[Dict[str, Any]]:
         """Fetch subtitle nodes without embeddings for embedding processing."""
-        with Metrics("GraphRAG/ArangoDB/fetch_subtitle_for_embedding", "green"):  # pragma: allowlist secret
+        with Metrics(
+            "GraphRAG/ArangoDB/fetch_subtitle_for_embedding", "green"
+        ):  # pragma: allowlist secret
             query = """
                 LET subtitles = (
                     FOR s IN @@collection

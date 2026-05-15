@@ -16,7 +16,12 @@ cd "$repo_root"
 uv sync --frozen --no-default-groups --quiet
 uv pip install --quiet pip-licenses
 
-DISALLOWED=$(uv run --no-sync --quiet pip-licenses --format=csv | grep -iE 'GPL|AGPL|SSPL|BUSL' | grep -v 'LGPL' || true)
+# docutils is multi-licensed (BSD/PSF/Public Domain/GPL); we use it under BSD/PSF.
+DISALLOWED=$(uv run --no-sync --quiet pip-licenses --format=csv \
+  | grep -iE 'GPL|AGPL|SSPL|BUSL' \
+  | grep -v 'LGPL' \
+  | grep -v '^"docutils"' \
+  || true)
 if [ -n "$DISALLOWED" ]; then
   echo "ERROR: Found packages with disallowed licenses:"
   echo "$DISALLOWED"
