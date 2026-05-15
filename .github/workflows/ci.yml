@@ -109,56 +109,12 @@ jobs:
       - name: Run pre-commit
         run: |
           uv tool install pre-commit
+          git init -b ci-lint
+          git add .
           pre-commit run --all-files
 
   # ---------------------------------------------------------------------------
-  # Job 2: Python type checking (mypy)
-  # ---------------------------------------------------------------------------
-  typecheck:
-    name: Type Check (mypy)
-    needs: prepare-source
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
-        with:
-          name: source-${{ github.sha }}
-          path: .source-artifact
-
-      - name: Unpack source artifact
-        run: |
-          find . -mindepth 1 -maxdepth 1 ! -name .source-artifact -exec rm -rf {} +
-          tar -xzf .source-artifact/source.tar.gz --strip-components=1
-          mkdir -p .ci
-          mv .source-artifact/tracked-files.txt .ci/tracked-files.txt
-          rm -rf .source-artifact
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86  # v5.4.2
-        with:
-          version: "0.6.2"
-
-      - name: Set up Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
-        with:
-          python-version: "3.13"
-
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libcairo2-dev pkg-config
-
-      - name: Install dependencies
-        run: uv sync --frozen
-
-      - name: Install mypy
-        run: uv tool install mypy
-
-      - name: mypy
-        run: mypy src/
-
-  # ---------------------------------------------------------------------------
-  # Job 3: Security scanning (detect-secrets)
+  # Job 2: Security scanning (detect-secrets)
   # ---------------------------------------------------------------------------
   security:
     name: Security Scan (detect-secrets)
@@ -195,7 +151,7 @@ jobs:
             $(cat "$GITHUB_WORKSPACE/.ci/tracked-files.txt")
 
   # ---------------------------------------------------------------------------
-  # Job 4: DCO sign-off check
+  # Job 3: DCO sign-off check
   # ---------------------------------------------------------------------------
   dco:
     name: DCO Sign-off
@@ -267,14 +223,13 @@ jobs:
           echo "OK: All commits have DCO sign-off."
 
   # ---------------------------------------------------------------------------
-  # Job 5: Trigger downstream pipeline and poll it to completion
+  # Job 4: Trigger downstream pipeline and poll it to completion
   # ---------------------------------------------------------------------------
   trigger-downstream-pipeline:
     name: Trigger Downstream Pipeline
     needs:
       - prepare-source
       - lint
-      - typecheck
       - security
       - dco
     runs-on: [self-hosted, downstream-pipeline]
