@@ -103,12 +103,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libcairo2-dev pkg-config
 
-      - name: Install dev dependencies
-        run: uv sync --group dev --frozen
+      - name: Install dependencies
+        run: uv sync --frozen
 
       - name: Run pre-commit
         run: |
-          pip install pre-commit
+          uv tool install pre-commit
           pre-commit run --all-files
 
   # ---------------------------------------------------------------------------
@@ -148,11 +148,14 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libcairo2-dev pkg-config
 
-      - name: Install dev dependencies
-        run: uv sync --group dev --frozen
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Install mypy
+        run: uv tool install mypy
 
       - name: mypy
-        run: uv run mypy src/
+        run: mypy src/
 
   # ---------------------------------------------------------------------------
   # Job 3: Security scanning (detect-secrets)
