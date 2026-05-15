@@ -315,16 +315,33 @@ class ContextManagerProcess(mp_ctx.Process):
                                     self._configure_queue.put({"error": str(e)})
 
                     elif item and "drop_collection" in item:
-                        # Drop the collection/index for every storage tool
-                        # registered with this context manager. Used by
-                        # via-engine on /files DELETE and stream removal when
-                        # KAFKA_ENABLED=true so Logstash-written documents
-                        # are wiped along with the asset.
+                        # Drop the collection/index on every registered tool
+                        # that exposes a ``drop_collection`` method. Used by
+                        # via-engine on /files DELETE, on stream removal when
+                        # KAFKA_ENABLED=true, and on file-summarize completion
+                        # under LVS_DISABLE_DB_RESET_ON_REQUEST_DONE=false
+                        # so Logstash- / in-process-written documents are
+                        # wiped along with the asset and the cluster shard
+                        # pool drains.
+                        #
+                        # Walk every tool category in cm_handler.tools rather
+                        # than a hardcoded list — tool categories are keyed
+                        # by the YAML ``type:`` value (``elasticsearch``,
+                        # ``milvus``, ``arango``, ``neo4j``, etc.) so the
+                        # earlier ``("storage", "vector_db")`` filter
+                        # silently matched nothing for the Elasticsearch
+                        # backend. ``callable(drop_fn)`` skips tool kinds
+                        # (``llm``, ``embedding``, …) that don't own a
+                        # collection.
                         try:
                             dropped = []
                             errors = []
-                            for tool_type in ("storage", "vector_db"):
-                                tools_by_name = self.cm_handler.tools.get(tool_type, {})
+                            for (
+                                tool_type,
+                                tools_by_name,
+                            ) in self.cm_handler.tools.items():
+                                if not isinstance(tools_by_name, dict):
+                                    continue
                                 for tool_name, tool in tools_by_name.items():
                                     drop_fn = getattr(tool, "drop_collection", None)
                                     if not callable(drop_fn):

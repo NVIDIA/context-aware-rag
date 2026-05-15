@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Copyright (c) 2024-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-FileCopyrightText: Copyright (c) 2024-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -19,7 +19,7 @@ requires = ["setuptools >= 64"]
 
 [project]
 name = "vss_ctx_rag"
-version = "3.0.0rc3"
+version = "3.0.0rc9"
 description = ""
 readme = "README.md"
 requires-python = ">=3.12"
@@ -33,7 +33,7 @@ dependencies = [
   "langchain_milvus==0.3.3",
   "langchain-openai>=1.0.0,<2.0.0",
   "langchain-experimental==0.4.1",
-  "langchain-nvidia-ai-endpoints==1.2.1",
+  "langchain-nvidia-ai-endpoints==1.3.0",
   "pymilvus>=2.6.0,<2.7.0",
   "pymilvus-model==0.3.2",
   "python-multipart==0.0.26",
@@ -145,8 +145,10 @@ constraint-dependencies = [
   # Remove once unstructured or pdfplumber pull Pillow>=12.2.0.
   "Pillow>=12.2.0",
   # CVE-2024-55945 (PKCE bypass) + BDSA-2026-7419. Via minio.
-  # Updated to >=1.7.0 for BDSA-2026-7419 (nSpect NSPECT-P1VD-WUVY). Remove once minio pulls Authlib>=1.7.0.
-  "Authlib>=1.7.0",
+  # Updated to >=1.7.2 for BDSA-2026-7419 (nSpect NSPECT-P1VD-WUVY). Remove once minio pulls Authlib>=1.7.2.
+  "Authlib>=1.7.2",
+  # Via minio. Remove once minio pulls urllib3>=2.7.0.
+  "urllib3>=2.7.0",
   # CVE-2024-56737 (path traversal). Via keyring/importlib.
   # Remove once keyring pulls jaraco-context>=6.1.2.
   "jaraco-context>=6.1.2",
@@ -156,6 +158,11 @@ constraint-dependencies = [
   # CVE-2025-47272 (XSS in notebook output). Via unstructured.
   # Remove once unstructured pulls nbconvert>=7.17.1.
   "nbconvert>=7.17.1",
+  # BDSA-2025-15435 / CVE-2025-64439 (RCE in JsonPlusSerializer).
+  # Via langgraph==1.1.8 -> langgraph-prebuilt==1.0.10.
+  # nSpect guidance: long-term fix is 1.0.11. Exact pin avoids alpha selection
+  # under prerelease=allow. Remove once langgraph pulls langgraph-prebuilt>=1.0.11.
+  "langgraph-prebuilt==1.0.11",
   # CVE-2026-34444 (arbitrary code exec via Lua sandbox escape). Previously transitive via
   # fakeredis[lua]/fastmcp 2.x; removed from lock with fastmcp 3.x upgrade. Safety pin in
   # case lupa is re-introduced. Remove once no transitive puller requires lupa<2.8.
