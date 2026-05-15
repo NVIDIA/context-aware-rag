@@ -106,6 +106,9 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen
 
+      - name: Remove generated egg-info
+        run: find . -type d -name '*.egg-info' -exec rm -rf {} +
+
       - name: Run pre-commit
         run: |
           uv tool install pre-commit

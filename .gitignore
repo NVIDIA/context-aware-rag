@@ -1,0 +1,10 @@
+**/__pycache__
+*.mp4
+build/*
+build
+*.egg-info
+py.typed
+.env
+examples/data/*
+examples/data
+docker/deploy/volumes/
