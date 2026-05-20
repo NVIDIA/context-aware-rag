@@ -335,8 +335,12 @@ class VlmStructuredBase(Function):
             *events* are ready to use.  *needs_type_inference* contains
             events that have a valid description but an empty/missing type
             (only populated when ``LVS_DROP_EMPTY_EVENT_FIELDS`` is
-            enabled).  Callers should pass the second list through
+            disabled/false).  Callers should pass the second list through
             ``_infer_event_types`` to attempt LLM-based classification.
+
+            When ``LVS_DROP_EMPTY_EVENT_FIELDS`` is enabled (the default),
+            events with an empty type are dropped outright.  Events with
+            an empty description are always dropped regardless of the flag.
 
         Parameters
         ----------
@@ -376,19 +380,30 @@ class VlmStructuredBase(Function):
                 try:
                     event = Event(**event_data)
 
-                    if drop_empty:
-                        ev_type = (event.type or "").strip()
-                        ev_desc = (event.description or "").strip()
-                        if not ev_desc:
+                    ev_type = (event.type or "").strip()
+                    ev_desc = (event.description or "").strip()
+
+                    if not ev_desc:
+                        logger.warning(
+                            "Dropping event with empty description "
+                            "(type=%r, description=%r): %s",
+                            event.type,
+                            event.description,
+                            event_data,
+                        )
+                        continue
+
+                    if not ev_type:
+                        if drop_empty:
                             logger.warning(
-                                "Dropping event with empty description "
+                                "Dropping event with empty type "
                                 "(type=%r, description=%r): %s",
                                 event.type,
                                 event.description,
                                 event_data,
                             )
                             continue
-                        if not ev_type:
+                        else:
                             needs_type_inference.append(event)
                             continue
 

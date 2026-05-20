@@ -19,7 +19,7 @@ requires = ["setuptools >= 64"]
 
 [project]
 name = "vss_ctx_rag"
-version = "3.0.0rc9"
+version = "3.0.0rc11"
 description = ""
 readme = "README.md"
 requires-python = ">=3.12"
