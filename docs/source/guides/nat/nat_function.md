@@ -60,7 +60,7 @@ functions:
     db_host: "localhost"
     db_port: "7687"
     db_user: "neo4j"
-    db_password: "passneo4j"
+    db_password: "passneo4j"  # pragma: allowlist secret
 
     embedding_model_name: embedding_llm
 
@@ -118,7 +118,7 @@ functions:
     db_host: "localhost"
     db_port: "7687"
     db_user: "neo4j"
-    db_password: "passneo4j"
+    db_password: "passneo4j"  # pragma: allowlist secret
 
     embedding_model_name: embedding_llm
 

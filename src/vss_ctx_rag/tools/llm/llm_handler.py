@@ -150,7 +150,7 @@ class ChatOpenAITool(LLMTool):
         model = (self.config.params.model or "").strip()
         api_key = (self.config.params.api_key or "").strip()
         if not api_key or api_key.strip() == "":
-            api_key = "NOAPIKEYSET"
+            api_key = "NOAPIKEYSET"  # pragma: allowlist secret
         base_url = (self.config.params.base_url or "").strip()
 
         llm_params = {
