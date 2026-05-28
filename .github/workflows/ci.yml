@@ -70,7 +70,7 @@ jobs:
   # Job 1: Python lint (ruff format + yamllint + copyright headers + license check)
   # ---------------------------------------------------------------------------
   lint:
-    name: Lint (pre-commit)
+    name: Lint
     needs: prepare-source
     runs-on: ubuntu-latest
     timeout-minutes: 10
