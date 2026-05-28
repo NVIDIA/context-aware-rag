@@ -31,8 +31,10 @@ RUN python3 -m pip install --user pipx && python3 -m pipx ensurepath && pipx ins
 ENV PATH=/home/appuser/.local/bin:$PATH
 
 USER root
+ENV HOME=/root
 
 WORKDIR /app
+RUN chown 1000:1000 /app
 
 COPY --chown=1000:1000 pyproject.toml README.md LICENSE LICENSE.3rdparty uv.lock /app/
 
