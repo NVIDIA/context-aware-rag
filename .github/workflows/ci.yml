@@ -81,6 +81,7 @@ jobs:
           path: .source-artifact
 
       - name: Unpack source artifact
+        working-directory: ${{ github.workspace }}
         run: |
           find . -mindepth 1 -maxdepth 1 ! -name .source-artifact -exec rm -rf {} +
           tar -xzf .source-artifact/source.tar.gz --strip-components=1
@@ -103,18 +104,30 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libcairo2-dev pkg-config
 
-      - name: Install dependencies
-        run: uv sync --frozen
+      - name: Install dev dependencies
+        run: uv sync --group dev --frozen
 
-      - name: Remove generated egg-info
-        run: find . -type d -name '*.egg-info' -exec rm -rf {} +
+      - name: ruff check
+        run: uv run ruff check .
 
-      - name: Run pre-commit
+      - name: ruff format
+        run: uv run ruff format --check .
+
+      # yamllint is GPL-3.0-or-later, so we run it ephemerally via `uvx`
+      # rather than declaring it as a project dep — that way it never
+      # appears in services/agent/uv.lock and never lands in any
+      # installed project venv. The license-check job is unaffected.
+      - name: yamllint
+        working-directory: ${{ github.workspace }}
         run: |
-          uv tool install pre-commit
-          git init -b ci-lint
-          git add .
-          pre-commit run --all-files
+          YAML_FILES=$(grep -E '^(\.github/.*\.ya?ml|\.pre-commit-config\.yaml|services/.*\.ya?ml)$' .ci/tracked-files.txt || true)
+          if [ -z "$YAML_FILES" ]; then
+            echo "No YAML files to lint."
+            exit 0
+          fi
+          uvx yamllint \
+            -d "{extends: default, rules: {line-length: {max: 200}, document-start: disable, indentation: {spaces: 2, indent-sequences: consistent}}}" \
+            $YAML_FILES
 
   # ---------------------------------------------------------------------------
   # Job 2: Security scanning (detect-secrets)

@@ -124,9 +124,7 @@ def parse_node_lock(data: bytes) -> Inventory:
     return out
 
 
-def _inventory_at_ref(
-    ref: str, filename: str, parser
-) -> Inventory:
+def _inventory_at_ref(ref: str, filename: str, parser) -> Inventory:
     inv: Inventory = {}
     for path in _list_lockfiles(ref, filename):
         data = _git_show(ref, path)
@@ -152,7 +150,15 @@ def _classifier_license(classifiers: list[str]) -> str:
 
 
 def _project_url(urls: dict[str, str], home_page: str) -> str:
-    for key in ("Repository", "Source", "Source Code", "Code", "Homepage", "Home", "GitHub"):
+    for key in (
+        "Repository",
+        "Source",
+        "Source Code",
+        "Code",
+        "Homepage",
+        "Home",
+        "GitHub",
+    ):
         if urls.get(key):
             return urls[key]
     return home_page or ""
@@ -216,7 +222,11 @@ def diff_language(
                 meta = base[(name, v)]
                 if language == "python" and not meta.get("license"):
                     meta = {**meta, **pypi_metadata(name, v)}
-                rows.append(_row(language, name, "removed", v, "", meta.get("license", ""), meta))
+                rows.append(
+                    _row(
+                        language, name, "removed", v, "", meta.get("license", ""), meta
+                    )
+                )
             continue
 
         # Coexisting set changed (version bump, license change, or both).
