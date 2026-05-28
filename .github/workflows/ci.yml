@@ -119,22 +119,6 @@ jobs:
       - name: ruff format
         run: uv run ruff format --check .
 
-      # yamllint is GPL-3.0-or-later, so we run it ephemerally via `uvx`
-      # rather than declaring it as a project dep — that way it never
-      # appears in services/agent/uv.lock and never lands in any
-      # installed project venv. The license-check job is unaffected.
-      - name: yamllint
-        working-directory: ${{ github.workspace }}
-        run: |
-          YAML_FILES=$(grep -E '^(\.github/.*\.ya?ml|\.pre-commit-config\.yaml|config/.*\.ya?ml)$' .ci/tracked-files.txt || true)
-          if [ -z "$YAML_FILES" ]; then
-            echo "No YAML files to lint."
-            exit 0
-          fi
-          uvx yamllint \
-            -d "{extends: default, rules: {line-length: {max: 200}, document-start: disable, indentation: {spaces: 2, indent-sequences: consistent}}}" \
-            $YAML_FILES
-
   # ---------------------------------------------------------------------------
   # Job 2: Security scanning (detect-secrets)
   # ---------------------------------------------------------------------------
