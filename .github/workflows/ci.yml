@@ -104,8 +104,14 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libcairo2-dev pkg-config
 
-      - name: Install dev dependencies
-        run: uv sync --group dev --frozen
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Remove generated egg-info
+        run: find . -type d -name '*.egg-info' -exec rm -rf {} +
+
+      - name: Install ruff
+        run: uv tool install ruff
 
       - name: ruff check
         run: uv run ruff check .
@@ -120,7 +126,7 @@ jobs:
       - name: yamllint
         working-directory: ${{ github.workspace }}
         run: |
-          YAML_FILES=$(grep -E '^(\.github/.*\.ya?ml|\.pre-commit-config\.yaml|services/.*\.ya?ml)$' .ci/tracked-files.txt || true)
+          YAML_FILES=$(grep -E '^(\.github/.*\.ya?ml|\.pre-commit-config\.yaml|config/.*\.ya?ml)$' .ci/tracked-files.txt || true)
           if [ -z "$YAML_FILES" ]; then
             echo "No YAML files to lint."
             exit 0
