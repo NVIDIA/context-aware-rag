@@ -34,22 +34,23 @@ USER root
 
 WORKDIR /app
 
-COPY pyproject.toml README.md LICENSE LICENSE.3rdparty uv.lock /app/
+COPY --chown=1000:1000 pyproject.toml README.md LICENSE LICENSE.3rdparty uv.lock /app/
 
-COPY src/ /app/src/
-COPY service/ /app/service/
-COPY test[s]/ /app/tests/
-COPY config/ /app/config/
-COPY packages/ /app/packages/
+COPY --chown=1000:1000 src/ /app/src/
+COPY --chown=1000:1000 service/ /app/service/
+COPY --chown=1000:1000 test[s]/ /app/tests/
+COPY --chown=1000:1000 config/ /app/config/
+COPY --chown=1000:1000 packages/ /app/packages/
 
-RUN mkdir -p /app/logs/
+RUN mkdir -p /app/logs/ && chown 1000:1000 /app/logs/
+
+USER 1000
 RUN touch /app/logs/vss_ctx_rag.log
+USER root
 
 ENV UV_PROJECT_ENVIRONMENT="/usr/local/"
 
 RUN uv sync --locked --all-packages
-
-RUN chown -R 1000:1000 /app /home/appuser
 
 ENV VSS_LOG_FILE=/app/logs/vss_ctx_rag.log
 ENV HOME=/home/appuser
