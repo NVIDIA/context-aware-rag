@@ -199,16 +199,16 @@ def get_agent(
             evaluation_guidance = ""
             if state["iteration_count"] >= 2:
                 guidance = evaluation_prompt_content
-                evaluation_guidance = f"""IMPORTANT: This is iteration {state['iteration_count']}. {guidance}"""
+                evaluation_guidance = f"""IMPORTANT: This is iteration {state["iteration_count"]}. {guidance}"""
 
             messages = [
                 thinking_sys_msg,
                 HumanMessage(
-                    content=f"""User Query: {state['original_query']}
+                    content=f"""User Query: {state["original_query"]}
 
-Previous Plan: {state['current_plan']}
+Previous Plan: {state["current_plan"]}
 
-Execution Results: {state['execution_results']}{evaluation_guidance}
+Execution Results: {state["execution_results"]}{evaluation_guidance}
 
 Evaluate these results and determine if you need more information or if you can provide a complete answer. If more information is needed, create a new execution plan. If complete, respond with **COMPLETE**.
 """
@@ -493,11 +493,11 @@ Evaluate these results and determine if you need more information or if you can 
         messages = [
             response_sys_msg,
             HumanMessage(
-                content=f"""Original Query: {state['original_query']}
+                content=f"""Original Query: {state["original_query"]}
 
-Final Analysis and Results: {state['current_plan']}
+Final Analysis and Results: {state["current_plan"]}
 
-All Execution Results: {state['execution_results']}
+All Execution Results: {state["execution_results"]}
 
 Provide a clean, direct answer to the user's question based on this information.
 """

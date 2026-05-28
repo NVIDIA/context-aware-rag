@@ -16,7 +16,10 @@
 from .register_in import vss_ctx_rag_ingestion
 from .register_ret import vss_ctx_rag_retrieval
 from .utils import create_vss_ctx_rag_config, nat_to_vss_config
-from .workflow.register_tool_call_workflow import ToolCallWorkflowConfig, tool_call_workflow
+from .workflow.register_tool_call_workflow import (
+    ToolCallWorkflowConfig,
+    tool_call_workflow,
+)
 from .workflow.tool_call_workflow import build_workflow_fn, get_document_ingestion_tool
 
 __all__ = [

@@ -55,7 +55,7 @@ class FoundationIngestionFunc(Function):
     async def aprocess_doc(self, doc: str, doc_i: int, doc_meta: dict):
         try:
             logger.info("Adding doc %d", doc_i)
-            logger.debug(f"APP_VECTORSTORE_URL {os.environ.get("APP_VECTORSTORE_URL")}")
+            logger.debug(f"APP_VECTORSTORE_URL {os.environ.get('APP_VECTORSTORE_URL')}")
             doc_meta.setdefault("is_first", False)
             doc_meta.setdefault("is_last", False)
             source = doc_meta.get("source", None)

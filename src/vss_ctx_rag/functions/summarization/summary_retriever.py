@@ -91,7 +91,7 @@ class SummaryRetriever(Function):
                     for chunk in chunks
                 ]
                 logger.debug(
-                    f"Docs: { [doc.page_content[:min(len(doc.page_content), 100)] for doc in docs]}"
+                    f"Docs: {[doc.page_content[: min(len(doc.page_content), 100)] for doc in docs]}"
                 )
                 logger.info(f"Creating summary with {len(docs)} docs")
                 summary = self.summarization_chain.invoke({"context": docs})
