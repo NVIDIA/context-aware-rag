@@ -1,0 +1,11 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Default: every PR requires approval from carag-developers.
+*                                       @NVIDIA/carag-developers
+
+# Dependency manifests and lockfiles — changes here trigger the License Diff
+# workflow and require additional approval from carag-osrb-approvers.
+pyproject.toml                          @NVIDIA/carag-developers @NVIDIA/carag-osrb-approvers
+packages/**/pyproject.toml              @NVIDIA/carag-developers @NVIDIA/carag-osrb-approvers
+uv.lock                                @NVIDIA/carag-developers @NVIDIA/carag-osrb-approvers
