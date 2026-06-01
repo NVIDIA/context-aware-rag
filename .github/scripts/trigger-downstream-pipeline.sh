@@ -141,6 +141,13 @@ def fetch_project_id(base_url: str, token: str, project_path: str) -> int:
     return int(response["id"])
 
 
+def resolve_release_tag() -> str:
+    """Return the Git tag name when this workflow run was triggered by a tag push."""
+    if os.environ.get("GITHUB_REF_TYPE", "").strip() == "tag":
+        return os.environ.get("GITHUB_REF_NAME", "").strip()
+    return ""
+
+
 def trigger_pipeline(
     base_url: str,
     token: str,
@@ -150,6 +157,7 @@ def trigger_pipeline(
     commit_sha: str,
     target_branch: str,
     compare_branch: str,
+    release_tag: str,
 ) -> dict[str, Any]:
     payload_pairs: list[tuple[str, str]] = [
         ("ref", ref),
@@ -160,6 +168,13 @@ def trigger_pipeline(
         ("variables[][key]", "CARAG_COMPARE_BRANCH"),
         ("variables[][value]", compare_branch),
     ]
+    if release_tag:
+        payload_pairs.extend(
+            [
+                ("variables[][key]", "CARAG_RELEASE_TAG"),
+                ("variables[][value]", release_tag),
+            ]
+        )
     payload = urlencode(payload_pairs).encode("utf-8")
     return request_json("Pipeline trigger", f"{base_url}/projects/{project_id}/pipeline", token, data=payload)
 
@@ -265,6 +280,7 @@ def main() -> int:
             add_mask(segment)
 
         target_branch, compare_branch = resolve_branches()
+        release_tag = resolve_release_tag()
 
         project_id = fetch_project_id(base_url, token, project_path)
         pipeline = trigger_pipeline(
@@ -276,6 +292,7 @@ def main() -> int:
             commit_sha,
             target_branch,
             compare_branch,
+            release_tag,
         )
 
         pipeline_iid = str(pipeline.get("iid") or pipeline.get("id") or "")
@@ -298,6 +315,8 @@ def main() -> int:
         print(f"  {variable_name}={commit_sha}")
         print(f"  CARAG_TARGET_BRANCH={target_branch}")
         print(f"  CARAG_COMPARE_BRANCH={compare_branch}")
+        if release_tag:
+            print(f"  CARAG_RELEASE_TAG={release_tag}")
 
         sha_short = pipeline_sha[:8] if pipeline_sha else ""
         commit_sha_short = commit_sha[:8] if commit_sha else ""
@@ -314,6 +333,8 @@ def main() -> int:
             summary_lines.append(f"- **CARAG_TARGET_BRANCH:** `{target_branch}`")
         if compare_branch:
             summary_lines.append(f"- **CARAG_COMPARE_BRANCH:** `{compare_branch}`")
+        if release_tag:
+            summary_lines.append(f"- **CARAG_RELEASE_TAG:** `{release_tag}`")
         if pipeline_created_at:
             summary_lines.append(f"- **Created at:** {pipeline_created_at}")
         write_summary("\n".join(summary_lines))
