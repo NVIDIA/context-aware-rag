@@ -478,8 +478,7 @@ class ContextManagerProcess(mp_ctx.Process):
             return output
         except Exception as e:
             logger.error(
-                f"Process Index: {self.process_index} - "
-                f"Error dropping collection: {e}"
+                f"Process Index: {self.process_index} - Error dropping collection: {e}"
             )
             return {"error": f"Error dropping collection: {e}"}
 

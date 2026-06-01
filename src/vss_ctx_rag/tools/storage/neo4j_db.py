@@ -653,7 +653,12 @@ class Neo4jGraphDB(GraphStorageTool):
                     )
 
     def fetch_subtitle_for_embedding(self) -> List[Dict[str, Any]]:
-        with Metrics("GraphRAG/Neo4j/fetch_subtitle_for_embedding", "green"):
+        # fmt: off
+        with Metrics(
+            "GraphRAG/Neo4j/fetch_subtitle_for_embedding",  # pragma: allowlist secret
+            "green",
+        ):
+            # fmt: on
             query = """
                     MATCH (s:Subtitle)
                     WHERE s.embedding IS NULL AND s.text IS NOT NULL

@@ -89,11 +89,11 @@ class PromptCapableTool(BaseTool, ABC):
             template=f"""
 ### {{tool_number}}. {cls.__name__}
 
-{template_info['xml_format']}
+{template_info["xml_format"]}
 
 - Use case:
 
-  {template_info['description']}
+  {template_info["description"]}
 
 {dynamic_rules}
 """,

@@ -909,7 +909,7 @@ class ChunkReader(PromptCapableTool):
                                     current_start = candidate_start_time
                                 except Exception as e:
                                     logger.debug(
-                                        f"Could not retrieve previous chunk {i+1}: {e}"
+                                        f"Could not retrieve previous chunk {i + 1}: {e}"
                                     )
 
                             logger.debug(
@@ -944,7 +944,7 @@ class ChunkReader(PromptCapableTool):
                                     current_end = candidate_end_time
                                 except Exception as e:
                                     logger.debug(
-                                        f"Could not retrieve next chunk {i+1}: {e}"
+                                        f"Could not retrieve next chunk {i + 1}: {e}"
                                     )
 
                             logger.debug(f"Next chunks to add: {next_chunks_to_add}")
