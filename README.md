@@ -160,6 +160,11 @@ This will start the following services:
 
   * UI available at `http://<HOST>:9090`
 
+* elasticsearch
+  * UI available at `http://<HOST>:9200`
+
+* kibana
+  * UI available at `http://<HOST>:5601`
 
 To change the storage volumes, export `DOCKER_VOLUME_DIRECTORY` to the desired directory.
 

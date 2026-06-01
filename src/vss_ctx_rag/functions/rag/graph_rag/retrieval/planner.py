@@ -199,16 +199,16 @@ def get_agent(
             evaluation_guidance = ""
             if state["iteration_count"] >= 2:
                 guidance = evaluation_prompt_content
-                evaluation_guidance = f"""IMPORTANT: This is iteration {state['iteration_count']}. {guidance}"""
+                evaluation_guidance = f"""IMPORTANT: This is iteration {state["iteration_count"]}. {guidance}"""
 
             messages = [
                 thinking_sys_msg,
                 HumanMessage(
-                    content=f"""User Query: {state['original_query']}
+                    content=f"""User Query: {state["original_query"]}
 
-Previous Plan: {state['current_plan']}
+Previous Plan: {state["current_plan"]}
 
-Execution Results: {state['execution_results']}{evaluation_guidance}
+Execution Results: {state["execution_results"]}{evaluation_guidance}
 
 Evaluate these results and determine if you need more information or if you can provide a complete answer. If more information is needed, create a new execution plan. If complete, respond with **COMPLETE**.
 """
@@ -233,19 +233,21 @@ Evaluate these results and determine if you need more information or if you can 
         }
 
     # TOOL EXECUTION NODE
-    async def tool_node_with_logging(state: AgentState):
+    async def tool_node_with_logging(state: AgentState, config: RunnableConfig):
         last_message = state["messages"][-1]
 
         if hasattr(last_message, "tool_calls") and last_message.tool_calls:
             tool_node = ToolNode(tool_list)
+            # Merge custom configurable keys into the graph-provided config
+            # so that langgraph's internal runtime keys are preserved.
+            merged_config = config.copy() if config else {}
+            configurable = merged_config.get("configurable", {})
+            configurable["chunk_size"] = state["chunk_size"]
+            configurable["is_subtitle"] = state["is_subtitle"]
+            merged_config["configurable"] = configurable
             result = await tool_node.ainvoke(
                 state,
-                config=RunnableConfig(
-                    configurable={
-                        "chunk_size": state["chunk_size"],
-                        "is_subtitle": state["is_subtitle"],
-                    }
-                ),
+                config=merged_config,
             )
 
             # Log and collect results
@@ -491,11 +493,11 @@ Evaluate these results and determine if you need more information or if you can 
         messages = [
             response_sys_msg,
             HumanMessage(
-                content=f"""Original Query: {state['original_query']}
+                content=f"""Original Query: {state["original_query"]}
 
-Final Analysis and Results: {state['current_plan']}
+Final Analysis and Results: {state["current_plan"]}
 
-All Execution Results: {state['execution_results']}
+All Execution Results: {state["execution_results"]}
 
 Provide a clean, direct answer to the user's question based on this information.
 """

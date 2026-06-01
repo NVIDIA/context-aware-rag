@@ -183,7 +183,7 @@ class GraphIngestion:
                     node_type = node.type if node.type else "Entity"
 
                     # Generate a new ID based on hash of description + name + uuid
-                    hash_input = f"{description}_{node_type}_{old_id}_{graph_doc.source.metadata.get("uuid", "default")}"
+                    hash_input = f"{description}_{node_type}_{old_id}_{graph_doc.source.metadata.get('uuid', 'default')}"
                     hash_obj = hashlib.sha1(hash_input.encode())
                     new_id = hash_obj.hexdigest()
 

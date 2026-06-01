@@ -57,6 +57,15 @@ MINIO_PASSWORD=<MINIO_PASSWORD> #minio root password, e.g. minio123
 ARANGO_DB_PORT=<ARANGO_PORT> #arangodb port, e.g. 8529
 ARANGO_DB_USERNAME=<ARANGO_USER> #arangodb username
 ARANGO_DB_PASSWORD=<ARANGO_PASSWORD> #arangodb password
+
+# Elasticsearch Configuration
+ES_PORT=<ES_PORT> #elasticsearch port, e.g. 9200
+ES_TRANSPORT_PORT=<ES_TRANSPORT_PORT> #elasticsearch transport port, e.g. 9300
+ES_MEM_LIMIT=<ES_MEM_LIMIT> #elasticsearch memory limit, e.g. 6442450944
+
+# Kibana Configuration
+KIBANA_PORT=<KIBANA_PORT> #kibana port, e.g. 5601
+KIBANA_HOST=<KIBANA_HOST> #kibana host, e.g. localhost
 ```
 
 ### Using docker compose

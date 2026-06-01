@@ -27,7 +27,7 @@ from vss_ctx_rag.utils.ctx_rag_logger import Metrics
 from vss_ctx_rag.tools.storage.storage_tool import StorageTool
 from langchain_core.prompts import ChatPromptTemplate
 from vss_ctx_rag.utils.globals import LLM_TOOL_NAME
-from langchain.chains.combine_documents import create_stuff_documents_chain
+from langchain_classic.chains.combine_documents import create_stuff_documents_chain
 from vss_ctx_rag.models.function_models import (
     FunctionModel,
 )
@@ -91,7 +91,7 @@ class SummaryRetriever(Function):
                     for chunk in chunks
                 ]
                 logger.debug(
-                    f"Docs: { [doc.page_content[:min(len(doc.page_content), 100)] for doc in docs]}"
+                    f"Docs: {[doc.page_content[: min(len(doc.page_content), 100)] for doc in docs]}"
                 )
                 logger.info(f"Creating summary with {len(docs)} docs")
                 summary = self.summarization_chain.invoke({"context": docs})

@@ -19,9 +19,6 @@ limitations under the License.
 
 NVIDIA's [Video Search and Summarization Blueprint (VSS)](https://github.com/NVIDIA-AI-Blueprints/video-search-and-summarization) integrates Context Aware RAG library for data ingestion and retrieval. VSS makes it easy to get started building and customizing video analytics AI agents for video search and summarization — all powered by generative AI, vision language models (VLMs). VLM processes video chunks into descriptive captions. These captions encapsulate key visual and contextual details and are ingested as documents into our library for processing and retrieval.
 
-For more information on Context Aware RAG integration with VSS, please refer to the [VSS Context Aware RAG Integration](https://via.gitlab-master-pages.nvidia.com/via-docs/content/context_aware_rag.html).
-
-
 ## Workflow
 
 1. Video Processing:

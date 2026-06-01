@@ -18,6 +18,7 @@ repos:
     rev: v4.5.0
     hooks:
       - id: check-added-large-files
+        exclude: ^(uv\.lock|LICENSE\.3rdparty)$
       - id: check-ast
       - id: check-case-conflict
       - id: check-docstring-first
@@ -26,7 +27,7 @@ repos:
       - id: check-merge-conflict
       - id: check-toml
       - id: check-yaml
-        exclude: ^(config/config.yaml|data/configs/.+\.yaml)$
+        exclude: ^(config/config.yaml|data/configs/.+\.yaml|config/config_lvs\.yaml)$
       - id: detect-private-key
       - id: end-of-file-fixer
       - id: mixed-line-ending
@@ -47,4 +48,27 @@ repos:
         name: TruffleHog secret scan
         entry: trufflehog git file://. --since-commit HEAD --results=verified,unknown --fail
         language: golang
+        stages: [pre-commit]
+
+  - repo: local
+    hooks:
+      - id: dco-signoff
+        name: DCO sign-off check
+        entry: bash -c 'grep -q "^Signed-off-by" "$1" || { echo "ERROR - Commit missing DCO sign-off. Use git commit -s"; exit 1; }' --
+        language: system
+        stages: [commit-msg]
+
+      - id: copyright-headers
+        name: SPDX copyright headers
+        entry: python3 .github/scripts/check_copyright_headers.py
+        language: system
+        pass_filenames: false
+        stages: [pre-commit]
+
+      - id: license-check-python
+        name: License Check (Python deps)
+        entry: bash .github/scripts/check_python_licenses.sh
+        language: system
+        files: ^(pyproject\.toml|packages/.+/pyproject\.toml|uv\.lock)$
+        pass_filenames: false
         stages: [pre-commit]

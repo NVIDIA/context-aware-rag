@@ -29,8 +29,8 @@ from vss_ctx_rag.utils.globals import (
 class SummarizationConfig(FunctionModel):
     class Prompts(BaseModel):
         caption: str
-        caption_summarization: str
-        summary_aggregation: str
+        caption_summarization: Optional[str] = ""
+        summary_aggregation: Optional[str] = ""
 
     class SummarizationParams(BaseModel):
         batch_size: int = Field(default=6, ge=1)

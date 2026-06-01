@@ -15,13 +15,13 @@
 
 import asyncio
 import os
-from typing import override, ClassVar
+from typing import override, ClassVar, Any
 
 from langchain_core.retrievers import RetrieverLike
-from langchain.docstore.document import Document
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_core.documents import Document
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_milvus import Milvus
-from pymilvus import MilvusException, connections
+from pymilvus import MilvusClient, MilvusException, connections
 from vss_ctx_rag.base.tool import Tool
 from vss_ctx_rag.models.tool_models import register_tool_config, register_tool
 from vss_ctx_rag.tools.storage.storage_tool import DBConfig
@@ -29,6 +29,44 @@ from vss_ctx_rag.tools.storage.vector_storage_tool import VectorStorageTool
 from vss_ctx_rag.utils.ctx_rag_logger import Metrics, logger
 from typing import Optional, Dict, List
 from pymilvus import Collection
+
+
+def _patch_milvus_client_orm_bridge():
+    """Monkey-patch MilvusClient to auto-register connections in ORM registry.
+
+    pymilvus 2.6 MilvusClient uses ConnectionManager (new API), but
+    langchain_milvus 0.3.3 also uses Collection (ORM API) which looks up
+    connections in the legacy connections._alias_handlers. This patch
+    bridges the gap by registering the handler after MilvusClient.__init__.
+
+    Remove this bridge when langchain-milvus natively supports pymilvus 2.6+.
+    """
+    import pymilvus
+
+    if not pymilvus.__version__.startswith("2.6."):
+        logger.warning(
+            "pymilvus %s detected; ORM bridge patch was written for 2.6.x — "
+            "verify compatibility or remove the patch.",
+            pymilvus.__version__,
+        )
+
+    _original_init = MilvusClient.__init__
+
+    def _patched_init(self, *args, **kwargs):
+        _original_init(self, *args, **kwargs)
+        try:
+            if hasattr(self, "_handler") and hasattr(self, "_using"):
+                connections._alias_handlers[self._using] = self._handler
+        except Exception:
+            logger.warning(
+                "Failed to register MilvusClient connection in ORM registry",
+                exc_info=True,
+            )
+
+    MilvusClient.__init__ = _patched_init
+
+
+_patch_milvus_client_orm_bridge()
 
 
 @register_tool_config("milvus")
@@ -58,7 +96,8 @@ class MilvusDBTool(VectorStorageTool):
         super().__init__(name, config, tools)
 
         self.connection = {
-            "uri": f"http://{self.config.params.host}:{self.config.params.port}"
+            "uri": f"http://{self.config.params.host}:{self.config.params.port}",
+            "timeout": 120,
         }
 
         self.text_splitter = RecursiveCharacterTextSplitter(
@@ -83,19 +122,85 @@ class MilvusDBTool(VectorStorageTool):
             "1",
         ]
 
+        if not self._drop_old_default:
+            self._warn_if_no_dynamic_field(self.collection_name)
         self._collection = Milvus(
             embedding_function=self.embedding,
             connection_args=self.connection,
             collection_name=self.collection_name,
             auto_id=True,
             drop_old=self._drop_old_default,
+            enable_dynamic_field=True,
         )
+        self._register_orm_connection(self._collection)
         self._current_collection = self._collection
 
         self._pymilvus_collection = None
         self._pymilvus_current_collection = None
 
         self.update_tool(self.config, tools)
+
+    def _warn_if_no_dynamic_field(self, collection_name: str):
+        """Log a warning if an existing collection lacks dynamic-field support.
+
+        langchain-milvus 0.3.3+ requires enable_dynamic_field=True for
+        content_metadata storage.  Collections created by older versions
+        will fail on insert; they must be recreated with drop_old=True.
+        """
+        try:
+            client = MilvusClient(uri=self.connection["uri"], timeout=10)
+            try:
+                if not client.has_collection(collection_name):
+                    return  # collection will be created with dynamic fields
+                schema = client.describe_collection(collection_name)
+                if not schema.get("enable_dynamic_field", False):
+                    logger.error(
+                        "Collection '%s' was created without "
+                        "enable_dynamic_field=True. langchain-milvus 0.3.3+ "
+                        "requires dynamic fields for content_metadata. "
+                        "Recreate the collection with drop_old=True or "
+                        "manually enable dynamic fields.",
+                        collection_name,
+                    )
+            finally:
+                client.close()
+        except Exception:
+            logger.debug(
+                "Could not verify dynamic-field support for '%s'",
+                collection_name,
+                exc_info=True,
+            )
+
+    @staticmethod
+    def _register_orm_connection(milvus_instance: Milvus):
+        """Bridge MilvusClient connection into pymilvus ORM registry.
+
+        langchain_milvus 0.3.3 uses MilvusClient (new API) which registers
+        connections in ConnectionManager, but also uses Collection (ORM API)
+        which looks up connections in the legacy connections._alias_handlers.
+        This bridge ensures the ORM Collection can find the connection.
+        """
+        try:
+            if not (
+                hasattr(milvus_instance, "alias") and hasattr(milvus_instance, "client")
+            ):
+                logger.warning(
+                    "Milvus instance missing alias/client — skipping ORM "
+                    "registration; pymilvus Collection operations may fail"
+                )
+                return
+            client = milvus_instance.client
+            alias = milvus_instance.alias
+            if not hasattr(client, "_handler"):
+                logger.warning(
+                    "MilvusClient missing _handler — skipping ORM "
+                    "registration; pymilvus Collection operations may fail"
+                )
+                return
+            connections._alias_handlers.setdefault(alias, client._handler)
+            logger.debug("ORM connection registered for alias '%s'", alias)
+        except Exception:
+            logger.warning("Failed to register ORM connection", exc_info=True)
 
     def get_current_collection(self) -> Milvus:
         """Get the currently active collection."""
@@ -165,13 +270,16 @@ class MilvusDBTool(VectorStorageTool):
             ):
                 return  # No changes needed
 
+            self._warn_if_no_dynamic_field(user_specified_collection_name)
             self._current_collection = Milvus(
                 embedding_function=self.embedding,
                 connection_args=self.connection,
                 collection_name=user_specified_collection_name,
                 auto_id=True,
                 drop_old=False,
+                enable_dynamic_field=True,
             )
+            self._register_orm_connection(self._current_collection)
             self.current_collection_name = user_specified_collection_name
             self.custom_metadata = custom_metadata
             self._pymilvus_current_collection = None
@@ -268,6 +376,39 @@ class MilvusDBTool(VectorStorageTool):
             logger.warning(f"Error getting text data: {e}")
             return []
 
+    def retrieve_docs(
+        self, uuid: str, doc_type: str = "raw_events"
+    ) -> List[Dict[str, Any]]:
+        try:
+            safe_uuid = self._escape(uuid)
+            expr = f"content_metadata['doc_type'] == '{doc_type}'"
+            if safe_uuid:
+                expr += f" and content_metadata['uuid'] == '{safe_uuid}'"
+
+            results = self.get_current_pymilvus_collection().query(
+                expr=expr,
+                output_fields=["*"],
+            )
+
+            return [
+                {
+                    **{
+                        k: v
+                        for k, v in result.items()
+                        if k != "pk" and k != "content_metadata" and k != "vector"
+                    },
+                    **(
+                        result.get("content_metadata", {})
+                        if isinstance(result.get("content_metadata"), dict)
+                        else {}
+                    ),
+                }
+                for result in results
+            ]
+        except Exception as e:
+            logger.warning(f"Error retrieving docs: {e}")
+            return []
+
     async def aget_max_batch_index(self, uuid: str = ""):
         if uuid:
             safe_uuid = self._escape(uuid)
@@ -279,6 +420,8 @@ class MilvusDBTool(VectorStorageTool):
             expr=expr,
             output_fields=["content_metadata"],
         )
+        if not searched_metadata:
+            return 0
         return max(
             [
                 batch_index["content_metadata"]["batch_i"]
@@ -363,7 +506,9 @@ class MilvusDBTool(VectorStorageTool):
             collection_name=self.collection_name,
             auto_id=True,
             drop_old=True,
+            enable_dynamic_field=True,
         )
+        self._register_orm_connection(self._collection)
         self._current_collection = self._collection
         self.current_collection_name = self.collection_name
         self.is_user_specified_collection_name = False

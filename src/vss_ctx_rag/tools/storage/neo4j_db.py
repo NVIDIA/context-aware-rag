@@ -21,12 +21,12 @@ import uuid as uuid_lib
 from contextlib import contextmanager
 from typing import Any, Dict, List, Tuple, ClassVar, Optional
 
-from langchain.retrievers import ContextualCompressionRetriever
-from langchain.retrievers.document_compressors import (
+from langchain_classic.retrievers import ContextualCompressionRetriever
+from langchain_classic.retrievers.document_compressors import (
     DocumentCompressorPipeline,
     EmbeddingsFilter,
 )
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.graphs import Neo4jGraph
 from langchain_community.graphs.graph_document import GraphDocument
 from langchain_community.vectorstores import Neo4jVector
@@ -462,6 +462,37 @@ class Neo4jGraphDB(GraphStorageTool):
         result = await self.aquery(query)
         return result[0]["max(s.batch_i)"]
 
+    def retrieve_docs(
+        self, uuid: str, doc_type: str = "raw_events"
+    ) -> List[Dict[str, Any]]:
+        try:
+            cypher = (
+                "MATCH (s:Summary) "
+                "WHERE s.doc_type = $doc_type AND s.uuid = $uuid "
+                "RETURN s ORDER BY s.chunkIdx ASC"
+            )
+            results = self.query(cypher, {"doc_type": doc_type, "uuid": uuid})
+            if not results:
+                return []
+
+            docs = []
+            for record in results:
+                node = record["s"]
+                docs.append(
+                    {
+                        "text": node.get("content", ""),
+                        "doc_type": node.get("doc_type", ""),
+                        "uuid": node.get("uuid", ""),
+                        "chunkIdx": node.get("chunkIdx", 0),
+                        "camera_id": node.get("camera_id", "default"),
+                        "event_count": node.get("event_count", 0),
+                    }
+                )
+            return docs
+        except Exception as e:
+            logger.warning(f"Error retrieving docs: {e}")
+            return []
+
     def add_summary(self, summary: str, metadata: dict):
         """Add a batch summary to the Neo4j database as a Summary node with metadata."""
         logger.debug(f"Adding summary {metadata['batch_i']} to Neo4j")
@@ -622,7 +653,12 @@ class Neo4jGraphDB(GraphStorageTool):
                     )
 
     def fetch_subtitle_for_embedding(self) -> List[Dict[str, Any]]:
-        with Metrics("GraphRAG/Neo4j/fetch_subtitle_for_embedding", "green"):
+        # fmt: off
+        with Metrics(
+            "GraphRAG/Neo4j/fetch_subtitle_for_embedding",  # pragma: allowlist secret
+            "green",
+        ):
+            # fmt: on
             query = """
                     MATCH (s:Subtitle)
                     WHERE s.embedding IS NULL AND s.text IS NOT NULL
@@ -1105,6 +1141,30 @@ class Neo4jGraphDB(GraphStorageTool):
                 vector_db = config["vector_creator"](
                     multi_channel, retrieval_query, index_name
                 )
+
+                # TODO: Upgrade to langchain-neo4j package
+                # Neo4j vector index can intermittently return None scores
+                # (e.g. due to eventual consistency after ingestion). Filter
+                # them out before langchain's validation check which cannot
+                # handle None in comparisons like `score < 0.0`.
+                _original_search = vector_db.similarity_search_with_score_by_vector
+
+                def _safe_search_with_score(*args, **kwargs):
+                    results = _original_search(*args, **kwargs)
+                    filtered = [
+                        (doc, score) for doc, score in results if score is not None
+                    ]
+                    if len(filtered) < len(results):
+                        logger.warning(
+                            f"Filtered out {len(results) - len(filtered)} "
+                            "result(s) with None similarity scores"
+                        )
+                    return filtered
+
+                vector_db.similarity_search_with_score_by_vector = (
+                    _safe_search_with_score
+                )
+
                 search_k = top_k or config["default_k"]
                 # Build base search kwargs
                 search_kwargs = {

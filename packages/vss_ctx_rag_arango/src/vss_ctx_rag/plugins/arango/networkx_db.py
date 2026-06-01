@@ -13,15 +13,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import math
 import os
 import traceback
 from typing import Any, Dict, List
 
-import cupy as cp
 import networkx as nx
 import numpy as np
-from cuml.neighbors import NearestNeighbors
 from langchain_community.graphs.graph_document import GraphDocument
+from sklearn.neighbors import NearestNeighbors
 
 from vss_ctx_rag.tools.storage.graph_storage_tool import GraphStorageTool
 from vss_ctx_rag.utils.ctx_rag_logger import Metrics, logger
@@ -63,10 +63,10 @@ class NetworkXGraphDB(GraphStorageTool):
             self.collection_name = config.params.collection_name
             self.graph = nx.MultiDiGraph(name=self.collection_name)
             logger.info(
-                f"Initialized nx-cugraph-cu12 Graph with collection name {self.collection_name}"
+                f"Initialized NetworkX Graph with collection name {self.collection_name}"
             )
         except Exception as e:
-            logger.error("Failed to initialize nx-cugraph-cu12 Graph: %s", e)
+            logger.error("Failed to initialize NetworkX Graph: %s", e)
             raise
 
     def upsert_node(self, entity_id: str, data: dict) -> None:
@@ -340,7 +340,7 @@ class NetworkXGraphDB(GraphStorageTool):
             logger.debug(f"Merged {link_count} HAS_ENTITY relationships.")
 
     def update_knn(self):
-        """Updates the KNN graph using cuML NearestNeighbors on NetworkX data."""
+        """Updates the KNN graph using sklearn NearestNeighbors on NetworkX data."""
         with Metrics("NXGraphRAG/UpdateKNN", "blue"):
             knn_min_score = float(os.environ.get("KNN_MIN_SCORE", 0.75))
             logger.info(f"Updating KNN graph with min score {knn_min_score}")
@@ -381,10 +381,10 @@ class NetworkXGraphDB(GraphStorageTool):
                 )
                 return
 
-            embeddings_array = cp.array(valid_embeddings)
+            embeddings_array = np.array(valid_embeddings, dtype=np.float32)
             num_samples = embeddings_array.shape[0]
 
-            top_k = min(int(cp.ceil(cp.sqrt(num_samples)).get()), num_samples)
+            top_k = min(math.ceil(math.sqrt(num_samples)), num_samples)
 
             logger.info(f"Calculating KNN for {num_samples} nodes with k={top_k}")
             try:
@@ -392,11 +392,8 @@ class NetworkXGraphDB(GraphStorageTool):
                 nn_model.fit(embeddings_array)
                 distances, indices = nn_model.kneighbors(embeddings_array)
 
-                distances = cp.asnumpy(distances)
-                indices = cp.asnumpy(indices)
-
             except Exception as e:
-                logger.error(f"cuML NearestNeighbors failed: {e}")
+                logger.error(f"sklearn NearestNeighbors failed: {e}")
                 logger.error(traceback.format_exc())
                 return
 

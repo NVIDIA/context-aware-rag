@@ -162,46 +162,74 @@ class FoundationRetrievalFunc(Function):
                     embedding_endpoint = self.db.embedding.base_url + "/embeddings"
                 else:
                     embedding_endpoint = self.db.embedding.base_url
+
+                # vdb_top_k fetches one extra document so the reranker
+                # has room to drop a low-score result while still
+                # returning self.top_k documents.
+                vdb_top_k = self.top_k + 1
+
+                search_kwargs = {
+                    "query": state["question"],
+                    "messages": [],
+                    "reranker_top_k": self.top_k,
+                    "vdb_top_k": vdb_top_k,
+                    "collection_names": [self.db.current_collection_name],
+                    "vdb_endpoint": self.db.connection["uri"],
+                    "enable_query_rewriting": True,
+                    "enable_filter_generator": False,
+                    "embedding_model": self.db.embedding.model,
+                    "embedding_endpoint": embedding_endpoint,
+                }
                 if self.reranker_tool:
-                    search_results = await asyncio.get_running_loop().run_in_executor(
-                        None,
-                        lambda: self.nvidia_rag.search(
-                            query=state["question"],
-                            messages=[],
-                            reranker_top_k=self.top_k,
-                            vdb_top_k=self.top_k + 1,
-                            collection_names=[self.db.current_collection_name],
-                            vdb_endpoint=self.db.connection["uri"],
-                            enable_query_rewriting=True,
-                            enable_reranker=True,
-                            embedding_model=self.db.embedding.model,
-                            embedding_endpoint=embedding_endpoint,
-                            reranker_model=self.reranker_tool.reranker.model,
-                            reranker_endpoint=self.reranker_tool.reranker.base_url,
-                            filter_expr='content_metadata["doc_type"] == "caption"',
-                        ),
+                    search_kwargs.update(
+                        {
+                            "enable_reranker": True,
+                            "reranker_model": self.reranker_tool.reranker.model,
+                            "reranker_endpoint": self.reranker_tool.reranker.base_url,
+                        }
                     )
                 else:
-                    search_results = await asyncio.get_running_loop().run_in_executor(
-                        None,
-                        lambda: self.nvidia_rag.search(
-                            query=state["question"],
-                            messages=[],
-                            reranker_top_k=self.top_k,
-                            vdb_top_k=self.top_k + 1,
-                            collection_names=[self.db.current_collection_name],
-                            vdb_endpoint=self.db.connection["uri"],
-                            enable_query_rewriting=True,
-                            enable_reranker=False,
-                            embedding_model=self.db.embedding.model,
-                            embedding_endpoint=embedding_endpoint,
-                            filter_expr='content_metadata["doc_type"] == "caption"',
-                        ),
+                    search_kwargs["enable_reranker"] = False
+
+                try:
+                    search_results = await self.nvidia_rag.search(**search_kwargs)
+                except (TypeError, AttributeError) as search_err:
+                    # TODO(nvidia-rag >=2.5.0): nvidia-rag internally returns
+                    # None in several code paths, causing TypeError or
+                    # AttributeError. Remove once nvidia-rag fixes upstream.
+                    logger.warning(
+                        "nvidia_rag search hit NoneType bug, "
+                        "falling back to direct vector search: %s",
+                        search_err,
+                        exc_info=True,
                     )
+                    search_results = None
+                except Exception as search_err:
+                    # nvidia-rag may also wrap the NoneType error in its
+                    # own exception type; detect via the message string.
+                    if "'NoneType'" in str(search_err):
+                        logger.warning(
+                            "nvidia_rag search hit NoneType bug "
+                            "(wrapped exception), falling back to "
+                            "direct vector search: %s",
+                            search_err,
+                            exc_info=True,
+                        )
+                        search_results = None
+                    else:
+                        raise
 
-                logger.debug(f"Search results: {search_results}")
-
-                doc_list = self.parse_search_results(search_results)
+                if search_results is not None:
+                    doc_list = self.parse_search_results(search_results)
+                    source_docs = search_results.results
+                else:
+                    # Fallback: use MilvusDBTool's similarity_search.
+                    # Use the same vdb_top_k so document count is consistent.
+                    langchain_docs = self.db.get_current_collection().similarity_search(
+                        state["question"], k=vdb_top_k
+                    )
+                    doc_list = [doc.page_content for doc in langchain_docs]
+                    source_docs = langchain_docs
 
                 response = await self.get_response(
                     question=state["question"],
@@ -212,9 +240,25 @@ class FoundationRetrievalFunc(Function):
 
                 logger.debug(f"FRAG Retrieval Response: {response}")
                 state["response"] = response
-                state["source_docs"] = self.format_docs_for_return(
-                    search_results.results
-                )
+                if search_results is not None:
+                    state["source_docs"] = self.format_docs_for_return(source_docs)
+                else:
+                    # Normalize langchain docs to the same shape as
+                    # format_docs_for_return (asset_dirs + length only).
+                    state["source_docs"] = [
+                        {
+                            "metadata": {
+                                "asset_dirs": (doc.metadata or {})
+                                .get("content_metadata", {})
+                                .get("asset_dirs"),
+                                "length": (doc.metadata or {})
+                                .get("content_metadata", {})
+                                .get("length"),
+                            },
+                            "page_content": doc.page_content,
+                        }
+                        for doc in source_docs
+                    ]
                 state["formatted_docs"] = doc_list
 
         except Exception as e:

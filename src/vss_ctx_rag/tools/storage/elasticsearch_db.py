@@ -17,8 +17,8 @@ import asyncio
 from typing import override, ClassVar, Optional, Dict, List, Any
 import os
 from langchain_core.retrievers import RetrieverLike
-from langchain.docstore.document import Document
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_core.documents import Document
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_elasticsearch.vectorstores import ElasticsearchStore
 
 from vss_ctx_rag.base.tool import Tool
@@ -81,7 +81,10 @@ class ElasticsearchDBTool(VectorStorageTool):
 
         self.embedding = self.get_tool("embedding").embedding
 
-        self.index_name = self.config.params.collection_name
+        # Use the incoming config (not self.config) so that the index name
+        # reflects the latest collection_name injected by ToolsConfig when
+        # the context UUID changes between requests.
+        self.index_name = config.params.collection_name
 
         self._vector_store = ElasticsearchStore(
             index_name=self.index_name,
@@ -90,6 +93,188 @@ class ElasticsearchDBTool(VectorStorageTool):
             strategy=ElasticsearchStore.ApproxRetrievalStrategy(hybrid=True, rrf=False),
             distance_strategy="COSINE",
         )
+
+        # Make sure the `default_*` index template is registered before any
+        # writer (in-process add_summary OR an external Logstash sidecar) can
+        # create an index with the wrong dynamic mapping. PUT is idempotent;
+        # safe to call on every (re)configure.
+        self._ensure_index_template()
+
+    def _ensure_index_template(self) -> None:
+        """Register the `default_*` index template once per ES connection.
+
+        Locks the field types that downstream queries depend on:
+        - ``vector`` -> ``dense_vector`` (otherwise ES dynamic-maps it as a
+          plain float[] which is not searchable with kNN and can't be
+          backfilled).
+        - Numeric/bool fields -> ``integer``/``long``/``double``/``boolean``
+          (otherwise the first stringified value would lock in
+          ``text + .keyword`` and break range queries / aggregations).
+        - String identifier fields -> ``keyword`` directly (avoids the
+          unnecessary ``text`` analyzer + ``.keyword`` sub-field cost).
+
+        Replaces the standalone ``es-bootstrap`` one-shot container so the
+        guarantee lives next to the storage tool that depends on it. Called
+        from :meth:`update_tool` after the vector store is constructed.
+        """
+        try:
+            try:
+                emb_dims = int(os.environ.get("LVS_EMB_DIMENSIONS", "1024"))
+            except (TypeError, ValueError):
+                emb_dims = 1024
+
+            template_body = {
+                "index_patterns": ["default_*"],
+                "priority": 100,
+                "template": {
+                    "settings": {
+                        "number_of_shards": 1,
+                        "number_of_replicas": 0,
+                    },
+                    "mappings": {
+                        "properties": {
+                            "text": {"type": "text"},
+                            "vector": {
+                                "type": "dense_vector",
+                                "dims": emb_dims,
+                                "index": True,
+                                "similarity": "cosine",
+                            },
+                            "metadata": {
+                                "properties": {
+                                    # ``source`` and every keyword-typed
+                                    # field under ``content_metadata`` is
+                                    # mapped as a ``keyword`` multi-field
+                                    # that also exposes a ``.keyword``
+                                    # sub-field. This matches what ES would
+                                    # auto-create from dynamic mapping for a
+                                    # ``text`` field, so existing queries in
+                                    # this file (and other consumers) that
+                                    # use the ``...keyword`` suffix continue
+                                    # to resolve regardless of whether the
+                                    # docs were inserted by Logstash via the
+                                    # streaming Kafka path or by
+                                    # ``add_summary`` on the in-process
+                                    # file path.
+                                    "source": {
+                                        "type": "keyword",
+                                        "fields": {"keyword": {"type": "keyword"}},
+                                    },
+                                    "content_metadata": {
+                                        "properties": {
+                                            "doc_type": {
+                                                "type": "keyword",
+                                                "fields": {
+                                                    "keyword": {"type": "keyword"}
+                                                },
+                                            },
+                                            "uuid": {
+                                                "type": "keyword",
+                                                "fields": {
+                                                    "keyword": {"type": "keyword"}
+                                                },
+                                            },
+                                            "camera_id": {
+                                                "type": "keyword",
+                                                "fields": {
+                                                    "keyword": {"type": "keyword"}
+                                                },
+                                            },
+                                            "streamId": {
+                                                "type": "keyword",
+                                                "fields": {
+                                                    "keyword": {"type": "keyword"}
+                                                },
+                                            },
+                                            "doc_i": {"type": "integer"},
+                                            "chunkIdx": {"type": "integer"},
+                                            "batch_i": {"type": "integer"},
+                                            "event_count": {"type": "integer"},
+                                            "total_events": {"type": "integer"},
+                                            "pts_offset_ns": {"type": "long"},
+                                            "start_pts": {"type": "long"},
+                                            "end_pts": {"type": "long"},
+                                            "start_ntp_float": {"type": "double"},
+                                            "end_ntp_float": {"type": "double"},
+                                            "start_ntp": {
+                                                "type": "keyword",
+                                                "fields": {
+                                                    "keyword": {"type": "keyword"}
+                                                },
+                                            },
+                                            "end_ntp": {
+                                                "type": "keyword",
+                                                "fields": {
+                                                    "keyword": {"type": "keyword"}
+                                                },
+                                            },
+                                            "is_first": {"type": "boolean"},
+                                            "is_last": {"type": "boolean"},
+                                            "file": {
+                                                "type": "keyword",
+                                                "fields": {
+                                                    "keyword": {"type": "keyword"}
+                                                },
+                                            },
+                                            "asset_dir": {
+                                                "type": "keyword",
+                                                "fields": {
+                                                    "keyword": {"type": "keyword"}
+                                                },
+                                            },
+                                            "cv_metadata_json_file": {
+                                                "type": "keyword",
+                                                "fields": {
+                                                    "keyword": {"type": "keyword"}
+                                                },
+                                            },
+                                            "osd_output_video_file": {
+                                                "type": "keyword",
+                                                "fields": {
+                                                    "keyword": {"type": "keyword"}
+                                                },
+                                            },
+                                            "cv_meta": {"type": "text"},
+                                            "cached_frames_cv_meta": {"type": "text"},
+                                        }
+                                    },
+                                }
+                            },
+                        }
+                    },
+                },
+                "_meta": {
+                    "description": (
+                        "default_* index mapping registered by "
+                        "ElasticsearchDBTool. Mirrors add_summary shape and "
+                        "the streaming Kafka -> Logstash -> ES path."
+                    ),
+                    "owner": "via-ctx-rag/ElasticsearchDBTool",
+                },
+            }
+
+            es_client = self._vector_store.client
+            # Use the unauth'd indices.put_index_template via the typed client.
+            es_client.indices.put_index_template(
+                name="visionllm",
+                body=template_body,
+            )
+            logger.debug(
+                "ElasticsearchDBTool: registered _index_template/visionllm "
+                "(dense_vector dims=%d)",
+                emb_dims,
+            )
+        except Exception as e:
+            # Non-fatal: the in-process write path can still proceed because
+            # langchain's ApproxRetrievalStrategy creates per-index mappings
+            # itself. The streaming Kafka path will silently miss the
+            # template — log loudly so it's visible in the operator's logs.
+            logger.warning(
+                "ElasticsearchDBTool: could not register _index_template/"
+                "visionllm at startup: %s. Streaming Kafka writes may end "
+                "up with degraded ES dynamic mappings.",
+                e,
+            )
 
     def add_summary(self, summary: str, metadata: dict):
         with Metrics(
@@ -122,7 +307,7 @@ class ElasticsearchDBTool(VectorStorageTool):
         except Exception as e:
             tm.error(e)
             logger.error(
-                f"Invalid metadata while adding documents to Elasticsearch: {metadata}"
+                f"Error adding document to Elasticsearch: {e}. Metadata: {metadata}"
             )
             raise e
 
@@ -315,6 +500,52 @@ class ElasticsearchDBTool(VectorStorageTool):
             logger.warning(f"Error getting text data: {e}")
             return []
 
+    def retrieve_docs(
+        self, uuid: str, doc_type: str = "raw_events"
+    ) -> List[Dict[str, Any]]:
+        try:
+            must_conditions = [
+                {"term": {"metadata.content_metadata.doc_type.keyword": doc_type}},
+            ]
+            if uuid:
+                safe_uuid = self._escape(uuid)
+                must_conditions.append(
+                    {"term": {"metadata.content_metadata.uuid.keyword": safe_uuid}}
+                )
+
+            query = {
+                "query": {"bool": {"must": must_conditions}},
+                "sort": [{"metadata.content_metadata.chunkIdx": {"order": "asc"}}],
+            }
+
+            es_client = self._vector_store.client
+            response = es_client.search(
+                index=self.index_name,
+                body=query,
+                size=10000,
+            )
+
+            results = []
+            for hit in response["hits"]["hits"]:
+                source = hit["_source"]
+                result = source.get("metadata", {})
+                text_content = source.get("text", "")
+                flattened = {
+                    "text": text_content,
+                    **{k: v for k, v in result.items() if k != "content_metadata"},
+                    **(
+                        result.get("content_metadata", {})
+                        if isinstance(result.get("content_metadata"), dict)
+                        else {}
+                    ),
+                }
+                results.append(flattened)
+
+            return results
+        except Exception as e:
+            logger.warning(f"Error retrieving docs: {e}")
+            return []
+
     async def aget_max_batch_index(self, uuid: str = ""):
         try:
             must_conditions = [
@@ -374,23 +605,28 @@ class ElasticsearchDBTool(VectorStorageTool):
 
             es_client.delete_by_query(index=self.index_name, body=query)
         except Exception as e:
-            logger.warning(f"Error dropping data: {e}")
+            if hasattr(e, "status_code") and e.status_code == 404:
+                logger.debug("Index '%s' already deleted", self.index_name)
+            else:
+                logger.warning(f"Error dropping data: {e}")
 
     def drop_collection(self):
+        """Delete the Elasticsearch index backing this tool.
+
+        Idempotent on a missing index (ES returns 404 / 400 are ignored).
+        The cached ``_vector_store`` reference is intentionally NOT
+        recreated here: langchain's ``ElasticsearchStore`` constructor
+        bootstraps the index with its mapping on initialisation, which
+        leaves a 0-doc index behind that still consumes a shard against
+        ``cluster.max_shards_per_node``. The existing wrapper's
+        underlying ES client remains valid and can be reused
+        for subsequent writes — langchain auto-creates the index lazily
+        on the next ``add_documents`` call, picking up the visionllm
+        template's mapping declared by ``_ensure_index_template``.
+        """
         try:
             es_client = self._vector_store.client
             es_client.indices.delete(index=self.index_name, ignore=[400, 404])
-
-            # Recreate the vector store
-            self._vector_store = ElasticsearchStore(
-                index_name=self.index_name,
-                embedding=self.embedding,
-                es_url=self.es_url,
-                strategy=ElasticsearchStore.ApproxRetrievalStrategy(
-                    hybrid=True, rrf=False
-                ),
-                distance_strategy="COSINE",
-            )
         except Exception as e:
             logger.warning(f"Error dropping collection: {e}")
 

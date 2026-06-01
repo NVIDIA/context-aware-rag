@@ -74,6 +74,15 @@ class SummaryMetrics:
         with open(file_name, "w") as f:
             json.dump(data, f, indent=4)
 
+    def dump_dict(self):
+        return {
+            "summary_tokens": self.summary_tokens,
+            "aggregation_tokens": self.aggregation_tokens,
+            "summary_requests": self.summary_requests,
+            "summary_latency": self.summary_latency,
+            "aggregation_latency": self.aggregation_latency,
+        }
+
     def reset(self):
         self.summary_tokens = 0
         self.aggregation_tokens = 0

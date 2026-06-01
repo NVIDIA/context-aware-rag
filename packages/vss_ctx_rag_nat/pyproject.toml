@@ -24,11 +24,11 @@ include = ["vss_ctx_rag.*"]
 
 [project]
 name = "vss_ctx_rag_nat"
-version = "1.0.2"
+version = "3.0.0"
 dependencies = [
     "vss_ctx_rag"
 ]
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 description = "Subpackage for NAT Integration in vss_ctx_rag"
 
 [tool.uv]

@@ -17,6 +17,26 @@ limitations under the License.
 
 # Release Notes
 
+## Release 1.0.2
+### Summary
+Latest release with bug fixes, Qwen3-VL support and documentation updates.
+
+### Changes
+- Bug fixes
+- Qwen3-VL support
+- Documentation updates
+
+
+## Release 1.0.1
+### Summary
+Minor release to add helm chart, documentation and config update and support llama 3.1 8B NIM
+
+### Changes
+- Added helm chart
+- Documentation update
+- Config update
+- LLM support: LLaMa 3.1 8B
+
 ## Release 1.0.0
 
 ### Summary
