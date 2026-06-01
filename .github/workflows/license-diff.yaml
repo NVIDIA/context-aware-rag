@@ -168,7 +168,7 @@ jobs:
             echo '```'
             echo "</details>"
             echo
-            echo "_This check is informational. CODEOWNERS still gates merge — get approval from \`@NVIDIA-AI-Blueprints/VSS_OSRB_Approvers\` for the touched lockfile/manifest paths._"
+            echo "_This check is informational — get approval from \`@NVIDIA/carag-osrb-approvers\` before merging._"
           } > comment.md
           existing=$(gh api "repos/${REPO}/issues/${PR}/comments" --paginate \
             --jq "[.[] | select(.body | startswith(\"$marker\"))][0].id")

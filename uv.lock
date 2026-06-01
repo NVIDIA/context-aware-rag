@@ -4801,7 +4801,7 @@ wheels = [
 
 [[package]]
 name = "vss-ctx-rag"
-version = "3.0.0rc11"
+version = "3.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "bleach" },
@@ -4937,7 +4937,7 @@ provides-extras = ["docs", "arango", "nat"]
 
 [[package]]
 name = "vss-ctx-rag-arango"
-version = "3.0.0rc11"
+version = "3.0.0"
 source = { editable = "packages/vss_ctx_rag_arango" }
 dependencies = [
     { name = "langchain-arangodb" },
@@ -4958,7 +4958,7 @@ requires-dist = [
 
 [[package]]
 name = "vss-ctx-rag-nat"
-version = "3.0.0rc11"
+version = "3.0.0"
 source = { editable = "packages/vss_ctx_rag_nat" }
 dependencies = [
     { name = "vss-ctx-rag" },
