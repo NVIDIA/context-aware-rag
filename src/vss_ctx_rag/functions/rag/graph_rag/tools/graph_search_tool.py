@@ -20,13 +20,27 @@ import math
 from langchain_core.runnables import RunnableConfig
 import os
 import base64
-import cv2
-import numpy as np
 import tempfile
+from functools import lru_cache
 from vss_ctx_rag.functions.rag.graph_rag.prompt import PromptCapableTool
 from vss_ctx_rag.tools.storage.graph_storage_tool import GraphStorageTool
 from vss_ctx_rag.utils.ctx_rag_logger import logger
 from vss_ctx_rag.tools.image.image_fetcher import ImageFetcher
+
+
+@lru_cache(maxsize=None)
+def is_opencv_available() -> bool:
+    """Return True when OpenCV can be imported.
+
+    Video conversion depends on this package.
+    """
+    try:
+        import cv2  # noqa: F401
+        import numpy  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
 
 
 def convert_frames_to_video_base64(base64_frames: List[str], fps: float = 2.0) -> str:
@@ -44,6 +58,15 @@ def convert_frames_to_video_base64(base64_frames: List[str], fps: float = 2.0) -
         return ""
     logger.info(f"Converting {len(base64_frames)} frames to video with fps {fps}")
     try:
+        try:
+            import cv2
+            import numpy as np
+        except ImportError:
+            logger.warning(
+                "OpenCV is not installed. Skipping image-to-video conversion."
+            )
+            return ""
+
         # Decode first frame to get dimensions
         first_frame_bytes = base64.b64decode(base64_frames[0])
         first_frame = cv2.imdecode(
@@ -663,6 +686,13 @@ class ChunkReader(PromptCapableTool):
         num_prev_chunks: int = 1,
         num_next_chunks: int = 1,
     ):
+        if pass_video_to_vlm and not is_opencv_available():
+            logger.warning(
+                "pass_video_to_vlm=True requires OpenCV, but OpenCV is not "
+                "installed. Falling back to image inputs for ChunkReader."
+            )
+            pass_video_to_vlm = False
+
         super().__init__(
             graph_db=graph_db,
             chat_llm=chat_llm,

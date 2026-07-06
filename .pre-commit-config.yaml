@@ -26,8 +26,6 @@ repos:
       - id: check-json
       - id: check-merge-conflict
       - id: check-toml
-      - id: check-yaml
-        exclude: ^(config/config.yaml|data/configs/.+\.yaml|config/config_lvs\.yaml)$
       - id: detect-private-key
       - id: end-of-file-fixer
       - id: mixed-line-ending
