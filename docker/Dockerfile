@@ -40,7 +40,8 @@ COPY --chown=1000:1000 pyproject.toml README.md LICENSE LICENSE.3rdparty uv.lock
 
 COPY --chown=1000:1000 src/ /app/src/
 COPY --chown=1000:1000 service/ /app/service/
-COPY --chown=1000:1000 test[s]/ /app/tests/
+
+### Remove the internal directory before release
 COPY --chown=1000:1000 config/ /app/config/
 COPY --chown=1000:1000 packages/ /app/packages/
 

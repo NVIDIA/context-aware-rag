@@ -2649,23 +2649,6 @@ wheels = [
 ]
 
 [[package]]
-name = "opencv-python"
-version = "4.12.0.88"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "numpy" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/ac/71/25c98e634b6bdeca4727c7f6d6927b056080668c5008ad3c8fc9e7f8f6ec/opencv-python-4.12.0.88.tar.gz", hash = "sha256:8b738389cede219405f6f3880b851efa3415ccd674752219377353f017d2994d", size = 95373294, upload-time = "2025-07-07T09:20:52.389Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/85/68/3da40142e7c21e9b1d4e7ddd6c58738feb013203e6e4b803d62cdd9eb96b/opencv_python-4.12.0.88-cp37-abi3-macosx_13_0_arm64.whl", hash = "sha256:f9a1f08883257b95a5764bf517a32d75aec325319c8ed0f89739a57fae9e92a5", size = 37877727, upload-time = "2025-07-07T09:13:31.47Z" },
-    { url = "https://files.pythonhosted.org/packages/33/7c/042abe49f58d6ee7e1028eefc3334d98ca69b030e3b567fe245a2b28ea6f/opencv_python-4.12.0.88-cp37-abi3-macosx_13_0_x86_64.whl", hash = "sha256:812eb116ad2b4de43ee116fcd8991c3a687f099ada0b04e68f64899c09448e81", size = 57326471, upload-time = "2025-07-07T09:13:41.26Z" },
-    { url = "https://files.pythonhosted.org/packages/62/3a/440bd64736cf8116f01f3b7f9f2e111afb2e02beb2ccc08a6458114a6b5d/opencv_python-4.12.0.88-cp37-abi3-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:51fd981c7df6af3e8f70b1556696b05224c4e6b6777bdd2a46b3d4fb09de1a92", size = 45887139, upload-time = "2025-07-07T09:13:50.761Z" },
-    { url = "https://files.pythonhosted.org/packages/68/1f/795e7f4aa2eacc59afa4fb61a2e35e510d06414dd5a802b51a012d691b37/opencv_python-4.12.0.88-cp37-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:092c16da4c5a163a818f120c22c5e4a2f96e0db4f24e659c701f1fe629a690f9", size = 67041680, upload-time = "2025-07-07T09:14:01.995Z" },
-    { url = "https://files.pythonhosted.org/packages/02/96/213fea371d3cb2f1d537612a105792aa0a6659fb2665b22cad709a75bd94/opencv_python-4.12.0.88-cp37-abi3-win32.whl", hash = "sha256:ff554d3f725b39878ac6a2e1fa232ec509c36130927afc18a1719ebf4fbf4357", size = 30284131, upload-time = "2025-07-07T09:14:08.819Z" },
-    { url = "https://files.pythonhosted.org/packages/fa/80/eb88edc2e2b11cd2dd2e56f1c80b5784d11d6e6b7f04a1145df64df40065/opencv_python-4.12.0.88-cp37-abi3-win_amd64.whl", hash = "sha256:d98edb20aa932fd8ebd276a72627dad9dc097695b3d435a4257557bbb49a79d2", size = 39000307, upload-time = "2025-07-07T09:14:16.641Z" },
-]
-
-[[package]]
 name = "openinference-instrumentation"
 version = "0.1.42"
 source = { registry = "https://pypi.org/simple" }
@@ -4801,7 +4784,7 @@ wheels = [
 
 [[package]]
 name = "vss-ctx-rag"
-version = "3.0.0"
+version = "3.0.1rc1"
 source = { editable = "." }
 dependencies = [
     { name = "bleach" },
@@ -4828,7 +4811,6 @@ dependencies = [
     { name = "nvidia-rag" },
     { name = "nvtx" },
     { name = "openai" },
-    { name = "opencv-python" },
     { name = "openinference-instrumentation-langchain" },
     { name = "openinference-instrumentation-openai" },
     { name = "openinference-semantic-conventions" },
@@ -4902,7 +4884,6 @@ requires-dist = [
     { name = "nvidia-sphinx-theme", marker = "extra == 'docs'", specifier = ">=0.0.7" },
     { name = "nvtx", specifier = "==0.2.11" },
     { name = "openai", specifier = "==1.109.1" },
-    { name = "opencv-python", specifier = "==4.12.0.88" },
     { name = "openinference-instrumentation-langchain", specifier = "==0.1.56" },
     { name = "openinference-instrumentation-openai", specifier = "==0.1.41" },
     { name = "openinference-semantic-conventions", specifier = "==0.1.25" },
@@ -4937,7 +4918,7 @@ provides-extras = ["docs", "arango", "nat"]
 
 [[package]]
 name = "vss-ctx-rag-arango"
-version = "3.0.0"
+version = "3.0.1rc1"
 source = { editable = "packages/vss_ctx_rag_arango" }
 dependencies = [
     { name = "langchain-arangodb" },
@@ -4958,7 +4939,7 @@ requires-dist = [
 
 [[package]]
 name = "vss-ctx-rag-nat"
-version = "3.0.0"
+version = "3.0.1rc1"
 source = { editable = "packages/vss_ctx_rag_nat" }
 dependencies = [
     { name = "vss-ctx-rag" },
