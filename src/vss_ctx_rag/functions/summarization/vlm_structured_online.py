@@ -23,7 +23,6 @@ pipeline like ``elasticpull``).
 """
 
 import asyncio
-from typing import List
 
 from vss_ctx_rag.utils.ctx_rag_logger import Metrics, logger
 from vss_ctx_rag.models.function_models import (
@@ -33,7 +32,6 @@ from vss_ctx_rag.models.function_models import (
 )
 
 from vss_ctx_rag.functions.summarization.vlm_structured_base import (
-    Event,
     VlmStructuredBase,
     VlmStructuredParamsBase,
 )
@@ -51,45 +49,6 @@ class VlmStructuredOnlineSummarizationConfig(FunctionModel):
 class VlmStructuredOnlineSummarization(VlmStructuredBase):
     """Online VLM Structured Summarization - fetches events from DB by UUID."""
 
-    # ── DB retrieval ────────────────────────────────────────────────────
-
-    async def _fetch_events_from_db(self, uuids: List[str]) -> List[Event]:
-        """Retrieve raw event documents from the database and parse into Event objects.
-
-        When *uuids* contains more than one entry, each parsed ``Event``
-        is tagged with the UUID it originated from so that downstream
-        storage and result building can preserve this provenance.
-        """
-        multi = len(uuids) > 1
-        all_events: List[Event] = []
-
-        for uuid in uuids:
-            raw_docs = self.db.retrieve_docs(uuid=uuid, doc_type="raw_events")
-            logger.info(
-                f"Fetched {len(raw_docs)} raw_event documents from DB for uuid '{uuid}'"
-            )
-            for doc in raw_docs:
-                text = doc.get("text", "")
-                if not text:
-                    continue
-                doc_meta = {k: v for k, v in doc.items() if k != "text"}
-                events, needs_type = self._parse_json_document(text, doc_meta)
-                if needs_type:
-                    inferred = await self._infer_event_types(needs_type, uuid=uuid)
-                    events.extend(inferred)
-                if multi:
-                    for event in events:
-                        event.uuid = uuid
-                all_events.extend(events)
-
-        logger.info(
-            f"Parsed {len(all_events)} total events from DB documents "
-            f"across {len(uuids)} UUID(s)"
-        )
-        return all_events
-
-    # ── Function interface ──────────────────────────────────────────────
-
     async def acall(self, state: dict):
         """Fetch raw events from DB by UUID(s), merge, aggregate, and return.
 
@@ -101,11 +60,10 @@ class VlmStructuredOnlineSummarization(VlmStructuredBase):
             self.call_schema.validate(state)
 
             uuids = self._resolve_uuids(state)
-            events = await self._fetch_events_from_db(uuids)
 
             start_time = state.get("start_time", self.filter_start_time)
             end_time = state.get("end_time", self.filter_end_time)
-            events = self._filter_events_by_time(events, start_time, end_time)
+            events = await self._fetch_events_from_db(uuids, start_time, end_time)
 
             await self._store_merged_events(events)
 

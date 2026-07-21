@@ -16,11 +16,60 @@
 """utils.py: File contains utility functions"""
 
 import re
+from typing import List
 
 
 from vss_ctx_rag.utils.ctx_rag_logger import logger, Metrics
 import asyncio
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+
+def split_top_level_json_values(content: str) -> List[str]:
+    """Split a string into its top-level JSON values.
+
+    LLM/VLM output occasionally contains several JSON arrays/objects
+    concatenated together (e.g. ``[...]\\n\\n[...]`` or ``{...}{...}``).
+    Handing that straight to ``json_repair.loads`` silently keeps only one
+    of them.  This scans the string — tracking bracket depth while ignoring
+    brackets inside strings — and returns each top-level value as a separate
+    substring.
+
+    A single top-level value (the common case) returns ``[content]``
+    unchanged so the caller's ``json_repair`` repair tolerance is preserved.
+    An unterminated trailing value is returned as-is so ``json_repair`` can
+    still attempt to repair it.
+    """
+    segments: List[str] = []
+    depth = 0
+    in_string = False
+    escape = False
+    start = None
+    for i, ch in enumerate(content):
+        if escape:
+            escape = False
+            continue
+        if in_string:
+            if ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+        elif ch in "[{":
+            if depth == 0:
+                start = i
+            depth += 1
+        elif ch in "]}":
+            if depth > 0:
+                depth -= 1
+                if depth == 0 and start is not None:
+                    segments.append(content[start : i + 1])
+                    start = None
+    if start is not None:
+        # Unterminated trailing value — hand it to json_repair as-is.
+        segments.append(content[start:])
+    return segments if len(segments) > 1 else [content]
 
 
 def remove_think_tags(text_in):
