@@ -47,7 +47,11 @@ from vss_ctx_rag.utils.globals import (
     DEFAULT_SUMM_RECURSION_LIMIT,
     LLM_TOOL_NAME,
 )
-from vss_ctx_rag.utils.utils import call_token_safe, remove_think_tags
+from vss_ctx_rag.utils.utils import (
+    call_token_safe,
+    remove_think_tags,
+    split_top_level_json_values,
+)
 
 
 # ── Shared Pydantic params base ────────────────────────────────────────
@@ -359,14 +363,22 @@ class VlmStructuredBase(Function):
         try:
             json_content = cls._extract_json_from_vlm_response(doc)
             with Metrics("VlmStructured/ParseJSONDocument", "green"):
-                data = json_repair.loads(json_content)
+                # The VLM sometimes emits multiple concatenated top-level
+                # arrays/objects; parse each so no events are dropped.
+                events_data: List = []
+                for segment in split_top_level_json_values(json_content):
+                    data = json_repair.loads(segment)
+                    segment_events = (
+                        data.get("events", []) if isinstance(data, dict) else data
+                    )
+                    if isinstance(segment_events, list):
+                        events_data.extend(segment_events)
+                    else:
+                        logger.warning(
+                            f"Expected events list, got {type(segment_events)}"
+                        )
 
-            logger.debug(f"Parsed and repaired JSON data: {data}")
-
-            events_data = data.get("events", []) if isinstance(data, dict) else data
-            if not isinstance(events_data, list):
-                logger.warning(f"Expected events list, got {type(events_data)}")
-                return [], []
+            logger.debug(f"Parsed and repaired JSON data: {events_data}")
 
             drop_empty = os.environ.get(
                 "LVS_DROP_EMPTY_EVENT_FIELDS", "true"
@@ -377,42 +389,57 @@ class VlmStructuredBase(Function):
             needs_type_inference: List[Event] = []
 
             for event_data in events_data:
-                try:
-                    event = Event(**event_data)
-
-                    ev_type = (event.type or "").strip()
-                    ev_desc = (event.description or "").strip()
-
-                    if not ev_desc:
+                candidate_events = (
+                    event_data if isinstance(event_data, list) else [event_data]
+                )
+                for candidate_event in candidate_events:
+                    if not isinstance(candidate_event, dict):
                         logger.warning(
-                            "Dropping event with empty description "
-                            "(type=%r, description=%r): %s",
-                            event.type,
-                            event.description,
-                            event_data,
+                            f"Skipping invalid event {candidate_event}: expected object"
                         )
                         continue
 
-                    if not ev_type:
-                        if drop_empty:
+                    try:
+                        ev_type = (candidate_event.get("type") or "").strip()
+                        ev_desc = (candidate_event.get("description") or "").strip()
+
+                        if not ev_desc:
                             logger.warning(
-                                "Dropping event with empty type "
+                                "Dropping event with empty description "
                                 "(type=%r, description=%r): %s",
-                                event.type,
-                                event.description,
-                                event_data,
+                                candidate_event.get("type"),
+                                candidate_event.get("description"),
+                                candidate_event,
                             )
                             continue
-                        else:
-                            needs_type_inference.append(event)
-                            continue
 
-                    if event.start_time >= event.end_time:
-                        deferred_events.append(event)
-                    else:
-                        valid_events.append(event)
-                except Exception as e:
-                    logger.warning(f"Skipping invalid event {event_data}: {e}")
+                        if not ev_type:
+                            if drop_empty:
+                                logger.warning(
+                                    "Dropping event with empty type "
+                                    "(type=%r, description=%r): %s",
+                                    candidate_event.get("type"),
+                                    candidate_event.get("description"),
+                                    candidate_event,
+                                )
+                                continue
+
+                            candidate_event = {**candidate_event, "type": ev_type}
+
+                        event = Event(**candidate_event)
+
+                        # Check duration first so zero/negative-duration events
+                        # take the deferred (chunk-boundary rescue/drop) path
+                        # regardless of type — this keeps invalid-timestamp
+                        # events out of _infer_event_types.
+                        if event.start_time >= event.end_time:
+                            deferred_events.append(event)
+                        elif not ev_type:
+                            needs_type_inference.append(event)
+                        else:
+                            valid_events.append(event)
+                    except Exception as e:
+                        logger.warning(f"Skipping invalid event {candidate_event}: {e}")
 
             if deferred_events:
                 for event in deferred_events:
@@ -423,7 +450,11 @@ class VlmStructuredBase(Function):
                     # (selected by ``_chunk_boundaries``).  Events are dropped
                     # only when no chunk boundaries are available at all (e.g.
                     # legacy in-memory path with empty ``doc_meta``).
-                    if chunk_start_time is not None and chunk_end_time is not None:
+                    if (
+                        chunk_start_time is not None
+                        and chunk_end_time is not None
+                        and chunk_end_time > chunk_start_time
+                    ):
                         logger.warning(
                             "Adjusting zero/negative-duration event "
                             "(start_time=%.3f, end_time=%.3f) to chunk "
@@ -570,6 +601,7 @@ class VlmStructuredBase(Function):
                 )
             return None
 
+        _infer_start = time.time()
         with Metrics("VlmStructured/InferEventTypes", "yellow"):
             with get_openai_callback() as cb:
                 results = await asyncio.gather(*(_infer_single(e) for e in events))
@@ -579,8 +611,14 @@ class VlmStructuredBase(Function):
                     f"Completion Tokens: {cb.completion_tokens}, "
                     f"Total Cost (USD): ${cb.total_cost}"
                 )
+                # summary_tokens keeps the grand total; event_type_infer_tokens is the
+                # per-call breakdown. calls/requests count actual LLM requests (one per
+                # event, fanned out via asyncio.gather).
                 self.metrics.summary_tokens += cb.total_tokens
+                self.metrics.event_type_infer_tokens += cb.total_tokens
+                self.metrics.event_type_infer_calls += cb.successful_requests
                 self.metrics.summary_requests += cb.successful_requests
+        self.metrics.event_type_infer_latency += time.time() - _infer_start
         return [e for e in results if e is not None]
 
     # ── Merging ─────────────────────────────────────────────────────────
@@ -599,6 +637,7 @@ class VlmStructuredBase(Function):
         try:
             with Metrics("VlmStructured/MergeDescriptions", "yellow"):
                 with get_openai_callback() as cb:
+                    _merge_start = time.time()
                     merged_description = await call_token_safe(
                         {
                             "event_type": event_type,
@@ -607,6 +646,7 @@ class VlmStructuredBase(Function):
                         self.description_merge_pipeline,
                         self.recursion_limit,
                     )
+                    _merge_elapsed = time.time() - _merge_start
                     logger.info(
                         f"LLM merged {len(descriptions)} descriptions for '{event_type}' event"
                     )
@@ -616,7 +656,19 @@ class VlmStructuredBase(Function):
                         f"Completion Tokens: {cb.completion_tokens}, "
                         f"Total Cost (USD): ${cb.total_cost}"
                     )
+                    # Accumulate merge metrics (None -> 0 on first call). Only reached
+                    # when enable_llm_merging=True, so a disabled run leaves these None.
+                    # summary_tokens keeps the grand total; llm_merge_tokens is the breakdown.
                     self.metrics.summary_tokens += cb.total_tokens
+                    self.metrics.llm_merge_latency = (
+                        self.metrics.llm_merge_latency or 0
+                    ) + _merge_elapsed
+                    self.metrics.llm_merge_tokens = (
+                        self.metrics.llm_merge_tokens or 0
+                    ) + cb.total_tokens
+                    self.metrics.llm_merge_calls = (
+                        self.metrics.llm_merge_calls or 0
+                    ) + cb.successful_requests
                     self.metrics.summary_requests += cb.successful_requests
                 return (
                     merged_description.strip()
@@ -748,6 +800,65 @@ class VlmStructuredBase(Function):
             f"{len(events)} events -> {len(filtered)} events"
         )
         return filtered
+
+    # ── DB retrieval ────────────────────────────────────────────────────
+
+    async def _fetch_events_from_db(
+        self,
+        uuids: List[str],
+        start_time: Optional[Union[float, str]] = None,
+        end_time: Optional[Union[float, str]] = None,
+    ) -> List[Event]:
+        """Retrieve raw event documents from the DB, parse them into Events, and
+        narrow to the ``[start_time, end_time]`` window.
+
+        Caption-source-agnostic: shared by the online (live) path and the
+        file-path ``LVS_CAPTION_SOURCE=db`` branch. The
+        ``dense_captions_retrieval_latency`` metric accumulates only the ES/DB
+        pull (``retrieve_docs``) plus the time-narrowing filter; JSON parsing
+        and the ``_infer_event_types`` LLM call in between are excluded (the
+        latter has its own ``event_type_infer_latency`` metric).
+
+        When *uuids* contains more than one entry, each parsed ``Event`` is
+        tagged with the UUID it originated from so downstream storage and
+        result building can preserve provenance.
+        """
+        multi = len(uuids) > 1
+        all_events: List[Event] = []
+        retrieval_latency = 0.0
+
+        for uuid in uuids:
+            _rd_start = time.time()
+            raw_docs = self.db.retrieve_docs(uuid=uuid, doc_type="raw_events")
+            retrieval_latency += time.time() - _rd_start
+            logger.info(
+                f"Fetched {len(raw_docs)} raw_event documents from DB for uuid '{uuid}'"
+            )
+            for doc in raw_docs:
+                text = doc.get("text", "")
+                if not text:
+                    continue
+                doc_meta = {k: v for k, v in doc.items() if k != "text"}
+                events, needs_type = self._parse_json_document(text, doc_meta)
+                if needs_type:
+                    inferred = await self._infer_event_types(needs_type, uuid=uuid)
+                    events.extend(inferred)
+                if multi:
+                    for event in events:
+                        event.uuid = uuid
+                all_events.extend(events)
+
+        _filter_start = time.time()
+        all_events = self._filter_events_by_time(all_events, start_time, end_time)
+        retrieval_latency += time.time() - _filter_start
+
+        # Dense-caption retrieval latency = ES pull + time-narrowing only.
+        self.metrics.dense_captions_retrieval_latency = retrieval_latency
+        logger.info(
+            f"Parsed {len(all_events)} total events from DB documents "
+            f"across {len(uuids)} UUID(s)"
+        )
+        return all_events
 
     # ── UUID resolution ────────────────────────────────────────────────
 
@@ -924,6 +1035,15 @@ class VlmStructuredBase(Function):
                 ensure_ascii=False,
             )
             logger.info("No events to process")
+
+        # Enabled-vs-disabled reporting: when LLM event-merging is ENABLED but no
+        # events needed merging, report 0 (not None) so downstream can distinguish
+        # "enabled, nothing to merge" (0) from "disabled" (None -> N/A / '-'). When
+        # merging actually ran, llm_merge_latency is already set and is left as-is.
+        if self.enable_llm_merging and self.metrics.llm_merge_latency is None:
+            self.metrics.llm_merge_latency = 0.0
+            self.metrics.llm_merge_tokens = 0
+            self.metrics.llm_merge_calls = 0
 
         state["metadata"] = self.metrics.dump_dict()
 

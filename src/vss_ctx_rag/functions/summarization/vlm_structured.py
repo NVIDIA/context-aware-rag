@@ -23,6 +23,8 @@ processes them all at ``acall`` time.  For the DB-backed variant see
 import asyncio
 from typing import List
 
+from pydantic import Field
+
 from vss_ctx_rag.utils.ctx_rag_logger import Metrics, logger
 from vss_ctx_rag.models.function_models import (
     register_function,
@@ -40,7 +42,14 @@ from vss_ctx_rag.functions.summarization.vlm_structured_base import (
 @register_function_config("vlm_structured_summarization")
 class VlmStructuredSummarizationConfig(FunctionModel):
     class VlmStructuredSummarizationParams(VlmStructuredParamsBase):
-        pass
+        caption_source: str = Field(
+            default="sse",
+            description=(
+                "'db' -> file-path captions are read from the DB by uuid; "
+                "'sse' -> in-memory accumulated captions. Also gates whether the "
+                "dense-caption retrieval metric reports 0 (enabled) or N/A (disabled)."
+            ),
+        )
 
     params: VlmStructuredSummarizationParams
 
@@ -55,6 +64,7 @@ class VlmStructuredSummarization(VlmStructuredBase):
         super().setup()
         self.accumulated_events = []
         self.kafka_enabled = self.get_param("kafka_enabled", default=False)
+        self.caption_source = self.get_param("caption_source", default="sse")
 
     async def acall(self, state: dict):
         """Process and merge accumulated events, then aggregate with LLM.
@@ -74,11 +84,18 @@ class VlmStructuredSummarization(VlmStructuredBase):
 
             start_time = state.get("start_time", self.filter_start_time)
             end_time = state.get("end_time", self.filter_end_time)
-            events = self._filter_events_by_time(
-                self.accumulated_events, start_time, end_time
-            )
+            if self.caption_source == "db" and self.kafka_enabled:
+                events = await self._fetch_events_from_db(uuids, start_time, end_time)
+            else:
+                events = self._filter_events_by_time(
+                    self.accumulated_events, start_time, end_time
+                )
 
             await self._store_merged_events(events)
+
+            # dense_captions_retrieval_latency is set inside _fetch_events_from_db
+            # (db + Kafka mode only). In sse / db-without-Kafka mode it stays None,
+            # so downstream distinguishes "disabled" (N/A) from "enabled" (a number).
 
             state = await self._build_result(
                 state,

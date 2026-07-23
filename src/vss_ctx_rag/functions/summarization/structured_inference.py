@@ -46,7 +46,7 @@ from vss_ctx_rag.utils.globals import (
     DEFAULT_SUMM_TIMEOUT_SEC,
     LLM_TOOL_NAME,
 )
-from vss_ctx_rag.utils.utils import call_token_safe
+from vss_ctx_rag.utils.utils import call_token_safe, split_top_level_json_values
 from vss_ctx_rag.functions.summarization.config import SummarizationConfig
 from vss_ctx_rag.models.function_models import (
     register_function,
@@ -675,26 +675,46 @@ class StructuredInference(Function):
         result = []
         logger.info("Starting to extract events from batches.")
 
+        try:
+            schema = json.loads(self.schema)
+        except json.JSONDecodeError as e:
+            logger.warning(f"Invalid schema JSON, cannot extract events: {e}")
+            return result
+
         # Extract events from all batches
         for batch in batches:
             text = batch.get("text")
             if text and text != "None":
                 logger.info(f"Batch Text: {text}")
-                try:
-                    with Metrics("StructuredBatchSumm/ParseJSONDocument", "green"):
-                        events_object = json_repair.loads(text)
-                    logger.debug(f"Parsed and repaired JSON data: {events_object}")
-
-                    validate(instance=events_object, schema=json.loads(self.schema))
-
-                    events = events_object.get("events", [])
-                    result.extend(event for event in events if event)
-                except ValidationError as e:
-                    logger.warning(
-                        f"Validation error: {e.message}. Schema: {self.schema}. Skipping."
-                    )
-                except (json.JSONDecodeError, KeyError, TypeError) as e:
-                    logger.warning(f"Failed to parse events from batch: {e}")
+                with Metrics("StructuredBatchSumm/ParseJSONDocument", "green"):
+                    # A batch summary may contain multiple concatenated
+                    # top-level JSON values; parse each independently so one
+                    # malformed segment does not discard the others.
+                    for segment in split_top_level_json_values(text):
+                        try:
+                            events_object = json_repair.loads(segment)
+                            logger.debug(
+                                f"Parsed and repaired JSON data: {events_object}"
+                            )
+                            if not isinstance(events_object, dict) or not isinstance(
+                                events_object.get("events"), list
+                            ):
+                                logger.warning(
+                                    "Skipping segment without an events list: %s",
+                                    events_object,
+                                )
+                                continue
+                            validate(instance=events_object, schema=schema)
+                            result.extend(
+                                event for event in events_object["events"] if event
+                            )
+                        except ValidationError as e:
+                            logger.warning(
+                                f"Validation error: {e.message}. "
+                                f"Schema: {self.schema}. Skipping."
+                            )
+                        except (json.JSONDecodeError, KeyError, TypeError) as e:
+                            logger.warning(f"Failed to parse events from batch: {e}")
 
         # Merge temporally close events of the same type
         if result:

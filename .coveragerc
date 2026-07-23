@@ -1,0 +1,25 @@
+[run]
+patch = subprocess
+parallel = true
+concurrency = multiprocessing,thread
+source = src, packages, service
+omit =
+    */tests/*
+    */test_*
+    */__pycache__/*
+    */venv/*
+    */.totvenv/*
+
+[report]
+exclude_lines =
+    pragma: no cover
+    def __repr__
+    raise AssertionError
+    raise NotImplementedError
+    if __name__ == .__main__.:
+    @abc.abstractmethod
+    ^\s*\.\.\.\s*$
+    ^\s*pass\s*$
+
+[html]
+directory = htmlcov
