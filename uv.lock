@@ -4918,7 +4918,7 @@ provides-extras = ["docs", "arango", "nat"]
 
 [[package]]
 name = "vss-ctx-rag-arango"
-version = "3.1.0rc2"
+version = "3.1.0"
 source = { editable = "packages/vss_ctx_rag_arango" }
 dependencies = [
     { name = "langchain-arangodb" },
@@ -4939,11 +4939,7 @@ requires-dist = [
 
 [[package]]
 name = "vss-ctx-rag-nat"
-<<<<<<< HEAD
 version = "3.1.0"
-=======
-version = "3.0.1rc1"
->>>>>>> 3284fdaa1a4c408e7867d5dedace5fb535746dae
 source = { editable = "packages/vss_ctx_rag_nat" }
 dependencies = [
     { name = "vss-ctx-rag" },
