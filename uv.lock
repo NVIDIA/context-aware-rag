@@ -4784,7 +4784,7 @@ wheels = [
 
 [[package]]
 name = "vss-ctx-rag"
-version = "3.1.0rc2"
+version = "3.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "bleach" },
@@ -4939,7 +4939,7 @@ requires-dist = [
 
 [[package]]
 name = "vss-ctx-rag-nat"
-version = "3.1.0rc2"
+version = "3.1.0"
 source = { editable = "packages/vss_ctx_rag_nat" }
 dependencies = [
     { name = "vss-ctx-rag" },
