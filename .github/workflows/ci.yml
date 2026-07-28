@@ -116,7 +116,9 @@ jobs:
         run: find . -type d -name '*.egg-info' -exec rm -rf {} +
 
       - name: Install ruff
-        run: uv tool install ruff
+        # Pinned: the formatter output changes between ruff releases, so an
+        # unpinned install makes CI disagree with local runs and pre-commit.
+        run: uv tool install ruff==0.15.22
 
       - name: ruff check
         run: uv run ruff check .
