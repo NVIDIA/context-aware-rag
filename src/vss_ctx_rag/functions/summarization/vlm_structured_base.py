@@ -57,6 +57,29 @@ from vss_ctx_rag.utils.utils import (
 # ── Shared Pydantic params base ────────────────────────────────────────
 
 
+DEFAULT_AGGREGATION_PROMPT = (
+    "You are a professional analyst preparing an observational report. Your task is to synthesize "
+    "timestamped events into a formal, cohesive narrative. Follow these guidelines:\n"
+    "- Write in a neutral, objective tone appropriate for official documentation.\n"
+    "- Organize the narrative in chronological order, maintaining logical flow between events.\n"
+    "- Consolidate events occurring within fractions of a second into single, coherent statements.\n"
+    "- Omit raw timestamps from the final output; focus on the sequence and nature of observed activities.\n"
+    "- Use precise, descriptive language avoiding colloquialisms or informal expressions.\n"
+    "- Structure the summary with clear transitions to convey the progression of events."
+)
+
+DEFAULT_DESCRIPTION_MERGE_PROMPT = (
+    "You are an expert at combining related event descriptions into a single, coherent description. "
+    "Your task is to merge multiple descriptions of the same type of event into one unified description.\n"
+    "Guidelines:\n"
+    "- Preserve all important details from each description\n"
+    "- Remove redundant or duplicate information\n"
+    "- Maintain a consistent tone and style\n"
+    "- Keep the description concise but comprehensive\n"
+    "- Output ONLY the merged description, no additional text or explanation"
+)
+
+
 class VlmStructuredParamsBase(BaseModel):
     """Parameter schema shared by both DB-backed and in-memory configs."""
 
@@ -81,7 +104,27 @@ class VlmStructuredParamsBase(BaseModel):
     max_events_per_batch: int = Field(default=50, ge=1)
     enable_llm_merging: bool = Field(
         default=False,
-        description="Enable LLM-based merging of descriptions for adjacent same-type events.",
+        description=(
+            "Enable LLM-based merging of descriptions for adjacent same-type events. "
+            "Also enabled when the LVS_ENABLE_LLM_MERGING environment variable is true/1/yes."
+        ),
+    )
+    aggregation_prompt: Optional[str] = Field(
+        default=None,
+        description=(
+            "Optional system prompt for final event aggregation. "
+            "When unset or empty, the built-in observational-report prompt is used. "
+            "The user message always provides events via the {input} placeholder."
+        ),
+    )
+    description_merge_prompt: Optional[str] = Field(
+        default=None,
+        description=(
+            "Optional system prompt for LLM description merging. Used only when "
+            "enable_llm_merging is true or LVS_ENABLE_LLM_MERGING is enabled. "
+            "When unset or empty, the built-in merge prompt is used. The user message "
+            "always provides {event_type} and {descriptions}."
+        ),
     )
     kafka_enabled: bool = Field(
         default=False,
@@ -202,11 +245,23 @@ class VlmStructuredBase(Function):
 
     llm: BaseChatModel
     aggregation_pipeline: RunnableSequence
-    description_merge_pipeline: RunnableSequence
+    description_merge_pipeline: Optional[RunnableSequence]
     output_parser: StrOutputParser
     recursion_limit: int
 
     # ── setup ────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _env_flag_enabled(name: str) -> bool:
+        return os.environ.get(name, "false").lower() in ("true", "1", "yes")
+
+    @staticmethod
+    def _as_bool(value) -> bool:
+        if isinstance(value, bool):
+            return value
+        if value is None:
+            return False
+        return str(value).strip().lower() in ("true", "1", "yes")
 
     def setup(self):
         self.db = self.get_tool("db")
@@ -219,7 +274,10 @@ class VlmStructuredBase(Function):
             "time_adjacent_threshold", default=4
         )
         self.max_events_per_batch = self.get_param("max_events_per_batch", default=50)
-        self.enable_llm_merging = self.get_param("enable_llm_merging", default=False)
+        # Param or LVS_ENABLE_LLM_MERGING env may enable LLM description merging.
+        self.enable_llm_merging = self._as_bool(
+            self.get_param("enable_llm_merging", default=False)
+        ) or self._env_flag_enabled("LVS_ENABLE_LLM_MERGING")
         self.kafka_enabled = self.get_param("kafka_enabled", default=False)
         _raw_start = self.get_param("start_time", default=None)
         _raw_end = self.get_param("end_time", default=None)
@@ -250,19 +308,12 @@ class VlmStructuredBase(Function):
 
     def _setup_aggregation_pipeline(self) -> None:
         """Setup LangChain pipelines for event aggregation and description merging."""
+        aggregation_system_prompt = (
+            self.get_param("aggregation_prompt", default=None) or ""
+        ).strip() or DEFAULT_AGGREGATION_PROMPT
         aggregation_prompt = ChatPromptTemplate.from_messages(
             [
-                (
-                    "system",
-                    "You are a professional analyst preparing an observational report. Your task is to synthesize "
-                    "timestamped events into a formal, cohesive narrative. Follow these guidelines:\n"
-                    "- Write in a neutral, objective tone appropriate for official documentation.\n"
-                    "- Organize the narrative in chronological order, maintaining logical flow between events.\n"
-                    "- Consolidate events occurring within fractions of a second into single, coherent statements.\n"
-                    "- Omit raw timestamps from the final output; focus on the sequence and nature of observed activities.\n"
-                    "- Use precise, descriptive language avoiding colloquialisms or informal expressions.\n"
-                    "- Structure the summary with clear transitions to convey the progression of events.",
-                ),
+                ("system", aggregation_system_prompt),
                 (
                     "user",
                     "The following events have been recorded:\n\n{input}\n\n"
@@ -275,30 +326,30 @@ class VlmStructuredBase(Function):
             aggregation_prompt | self.llm | self.output_parser | remove_think_tags
         )
 
-        description_merge_prompt = ChatPromptTemplate.from_messages(
-            [
-                (
-                    "system",
-                    "You are an expert at combining related event descriptions into a single, coherent description. "
-                    "Your task is to merge multiple descriptions of the same type of event into one unified description.\n"
-                    "Guidelines:\n"
-                    "- Preserve all important details from each description\n"
-                    "- Remove redundant or duplicate information\n"
-                    "- Maintain a consistent tone and style\n"
-                    "- Keep the description concise but comprehensive\n"
-                    "- Output ONLY the merged description, no additional text or explanation",
-                ),
-                (
-                    "user",
-                    "Event type: {event_type}\n\n"
-                    "Descriptions to merge:\n{descriptions}\n\n"
-                    "Merged description:",
-                ),
-            ]
-        )
-        self.description_merge_pipeline = (
-            description_merge_prompt | self.llm | self.output_parser | remove_think_tags
-        )
+        # Description-merge pipeline is only built when LLM merging is enabled
+        # (enable_llm_merging param or LVS_ENABLE_LLM_MERGING env).
+        self.description_merge_pipeline = None
+        if self.enable_llm_merging:
+            description_merge_system_prompt = (
+                self.get_param("description_merge_prompt", default=None) or ""
+            ).strip() or DEFAULT_DESCRIPTION_MERGE_PROMPT
+            description_merge_prompt = ChatPromptTemplate.from_messages(
+                [
+                    ("system", description_merge_system_prompt),
+                    (
+                        "user",
+                        "Event type: {event_type}\n\n"
+                        "Descriptions to merge:\n{descriptions}\n\n"
+                        "Merged description:",
+                    ),
+                ]
+            )
+            self.description_merge_pipeline = (
+                description_merge_prompt
+                | self.llm
+                | self.output_parser
+                | remove_think_tags
+            )
 
     # ── JSON parsing ────────────────────────────────────────────────────
 
@@ -629,6 +680,8 @@ class VlmStructuredBase(Function):
         """Use LLM to merge multiple event descriptions into one coherent description."""
         if len(descriptions) == 1:
             return descriptions[0]
+        if self.description_merge_pipeline is None:
+            return " | ".join(descriptions)
 
         formatted_descriptions = "\n".join(
             f"{i + 1}. {desc}" for i, desc in enumerate(descriptions)

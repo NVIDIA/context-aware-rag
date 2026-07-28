@@ -155,6 +155,9 @@ Context Aware RAG provides the following methods for summarizing content.
     - Aggregation: Combines batch summaries using a secondary prompt (summary_aggregation).
 - Offline Summarization: Batch summarization summarizes as a batch of documents as soon as the batch is full while still receiving documents. Offline summarization on the other hand, summarizes the batches only when the user requests for it.
 - Summary Retriever: Retrieves documents between given start and end times and summarizes it based on the configured prompt.
+- VLM Structured Summarization (`vlm_structured_summarization` / `vlm_structured_summarization_online`): Parses structured VLM event JSON, merges overlapping/adjacent events, then aggregates with an LLM.
+    - Final narrative aggregation uses `aggregation_prompt` (optional; built-in default when unset).
+    - LLM description merging uses `description_merge_prompt` and is only enabled when `enable_llm_merging` is true or the `LVS_ENABLE_LLM_MERGING` environment variable is enabled (`true` / `1` / `yes`). When disabled, adjacent same-type descriptions are concatenated.
 
 ## Alerts
 

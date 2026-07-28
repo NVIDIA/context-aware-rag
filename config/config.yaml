@@ -78,6 +78,12 @@ functions:
     params:
       time_overlap_threshold: 0.1
       max_events_per_batch: 50
+      enable_llm_merging: !ENV ${LVS_ENABLE_LLM_MERGING:false}
+      # Optional: override default aggregation / description-merge system prompts.
+      # aggregation_prompt: |
+      #   Custom aggregation system prompt...
+      # description_merge_prompt: |
+      #   Custom description-merge system prompt... (used only when LLM merging is enabled)
     tools:
       db: !ENV ${LVS_DATABASE_BACKEND:elasticsearch_db}
       llm: summarization_llm
@@ -87,6 +93,7 @@ functions:
     params:
       time_overlap_threshold: 0.1
       max_events_per_batch: 50
+      enable_llm_merging: !ENV ${LVS_ENABLE_LLM_MERGING:false}
     tools:
       db: !ENV ${LVS_DATABASE_BACKEND:elasticsearch_db}
       llm: summarization_llm
