@@ -333,6 +333,34 @@ response = requests.post(url, headers=headers, json=data)
 print(response.json()["result"])
 ```
 
+### VLM Structured Summarization Prompts
+
+For `vlm_structured_summarization` / `vlm_structured_summarization_online`, you can customize LLM prompts via function params:
+
+- `aggregation_prompt`: system prompt for the final narrative aggregation (optional; built-in default when unset).
+- `description_merge_prompt`: system prompt for merging adjacent same-type event descriptions. This prompt is only used when LLM merging is enabled.
+
+Enable LLM description merging with either:
+
+- config: `enable_llm_merging: true`, or
+- environment: `LVS_ENABLE_LLM_MERGING=true` (also `1` / `yes`)
+
+Example:
+
+```yaml
+functions:
+  summarization:
+    type: vlm_structured_summarization
+    params:
+      enable_llm_merging: !ENV ${LVS_ENABLE_LLM_MERGING:false}
+      aggregation_prompt: |
+        Write a concise chronological summary of the events.
+      description_merge_prompt: |
+        Merge the provided descriptions into one coherent description.
+```
+
+See [Configuration](https://nvidia.github.io/context-aware-rag/overview/configuration.html) for the full parameter list.
+
 ## Acknowledgements
 
 We would like to thank the following projects that made Context Aware RAG possible:

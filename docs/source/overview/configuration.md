@@ -306,6 +306,47 @@ Parameters:
 - `timeout_sec` (int): Optional. Per‑batch call timeout in seconds. Default: 120.
 - `summ_rec_lim` (int): Optional. Max recursion retries for token‑safe summarization. Default: 8.
 
+#### VLM Structured Summarization
+
+`vlm_structured_summarization` and `vlm_structured_summarization_online` parse structured VLM event JSON, merge overlapping/adjacent events, then produce a final narrative with an LLM.
+
+```yaml
+summarization:
+  type: vlm_structured_summarization
+  params:
+    time_overlap_threshold: 0.1
+    time_adjacent_threshold: 4
+    max_events_per_batch: 50
+    enable_llm_merging: !ENV ${LVS_ENABLE_LLM_MERGING:false}
+    aggregation_prompt: |
+      Optional custom system prompt for final narrative aggregation.
+    description_merge_prompt: |
+      Optional custom system prompt for merging adjacent same-type descriptions.
+      Only used when LLM merging is enabled.
+  tools:
+    llm: summarization_llm
+    db: elasticsearch_db
+```
+
+Tools required:
+- `db`: Storage backend used to persist/fetch events (online path) or related metadata.
+- `llm`: LLM used for final aggregation and optional description merging.
+
+Parameters:
+- `time_overlap_threshold` (float): Optional. Minimum overlap in seconds to merge overlapping events. Default: `0.1`.
+- `time_adjacent_threshold` (float): Optional. Maximum gap in seconds to merge adjacent events. Default: `4`.
+- `max_events_per_batch` (int): Optional. Max events batched for type-inference / processing. Default: `50`.
+- `enable_llm_merging` (bool): Optional. Enable LLM-based merging of adjacent same-type event descriptions. Default: `false`. Also enabled when `LVS_ENABLE_LLM_MERGING` is `true` / `1` / `yes`.
+- `aggregation_prompt` (str): Optional. System prompt for final event aggregation. When unset/empty, a built-in observational-report prompt is used. The user message always supplies events via `{input}`.
+- `description_merge_prompt` (str): Optional. System prompt for LLM description merging. Used **only** when LLM merging is enabled (`enable_llm_merging` or `LVS_ENABLE_LLM_MERGING`). When unset/empty, a built-in merge prompt is used. The user message always supplies `{event_type}` and `{descriptions}`.
+- `uuid` / `uuids`: Optional stream identifier(s).
+- `start_time` / `end_time`: Optional time filters for included events.
+- `kafka_enabled` (bool): Optional. When true, Elasticsearch writes are handled externally. Default: `false`.
+- `summ_rec_lim` (int): Optional. Max recursion retries for token-safe LLM calls. Default: `8`.
+
+Environment variables:
+- `LVS_ENABLE_LLM_MERGING`: When set to `true`, `1`, or `yes`, enables LLM description merging even if `enable_llm_merging` is not set in config. The `description_merge_prompt` parameter is only applied in this mode.
+
 #### Ingestion
 
 The `ingestion_function` is called when the document addition is done to finalize the graph or complete processing of the documents.
