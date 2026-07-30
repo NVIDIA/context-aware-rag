@@ -149,8 +149,19 @@ def _parse_timestamp(value: Union[int, float, str]) -> float:
     Accepts:
       - Numeric values (int / float) — returned as-is.
       - Numeric strings (e.g. ``"123.45"``) — converted via ``float()``.
+      - Video-relative timestamps in ``MM:SS`` or ``HH:MM:SS`` form —
+        converted to elapsed seconds. These measure elapsed time rather than
+        wall-clock time, so hours are not capped at 24 (the two-digit fields
+        allow up to ``99:59:59``) and cannot be negative. A malformed
+        component (e.g. ``"00:60"``) raises ``ValueError`` rather than
+        falling back to ISO parsing.
       - ISO 8601 strings (e.g. ``"2025-01-15T10:30:00Z"``) — parsed and
         converted to a POSIX / epoch-seconds float.
+
+    Raises:
+        ValueError: If *value* is a string that matches none of the accepted
+            forms, or is a duration with an out-of-range component.
+        TypeError: If *value* is neither numeric nor a string (e.g. ``None``).
     """
     if isinstance(value, (int, float)):
         return float(value)
@@ -159,6 +170,27 @@ def _parse_timestamp(value: Union[int, float, str]) -> float:
             return float(value)
         except ValueError:
             pass
+
+        duration_match = re.fullmatch(
+            r"(?:(?P<hours>\d{2}):)?"
+            r"(?P<minutes>\d{2}):"
+            r"(?P<seconds>\d{2}(?:\.\d+)?)",
+            value,
+        )
+        if duration_match:
+            hours_group = duration_match.group("hours")
+            hours = int(hours_group) if hours_group is not None else 0
+            minutes = int(duration_match.group("minutes"))
+            seconds = float(duration_match.group("seconds"))
+            # In MM:SS form the leading field is a total minute count, so it may
+            # exceed 59; once hours are given, minutes must wrap normally.
+            if seconds >= 60 or (hours_group is not None and minutes >= 60):
+                raise ValueError(
+                    f"Cannot parse timestamp: {value!r}; seconds must be < 60 and "
+                    "minutes must be < 60 when hours are present"
+                )
+            return hours * 3600 + minutes * 60 + seconds
+
         normalized = value.replace("Z", "+00:00") if value.endswith("Z") else value
         try:
             dt = datetime.fromisoformat(normalized)
@@ -167,7 +199,10 @@ def _parse_timestamp(value: Union[int, float, str]) -> float:
             return dt.timestamp()
         except ValueError:
             raise ValueError(f"Cannot parse timestamp: {value!r}")
-    raise TypeError(f"Expected numeric or ISO timestamp, got {type(value).__name__}")
+    raise TypeError(
+        "Expected numeric, MM:SS, HH:MM:SS, or ISO timestamp, "
+        f"got {type(value).__name__}"
+    )
 
 
 # ── Event model ─────────────────────────────────────────────────────────
@@ -831,8 +866,9 @@ class VlmStructuredBase(Function):
         ``event.end_time >= start_time`` and ``event.start_time <= end_time``.
         If both bounds are *None* the original list is returned unchanged.
 
-        *start_time* and *end_time* accept numeric values **or** ISO 8601
-        strings; they are coerced to ``float`` epoch-seconds before comparison.
+        *start_time* and *end_time* accept numeric values, ``MM:SS`` /
+        ``HH:MM:SS`` elapsed-time strings, or ISO 8601 strings; they are
+        coerced to ``float`` seconds before comparison.
         """
         if start_time is None and end_time is None:
             return events
