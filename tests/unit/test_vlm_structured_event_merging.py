@@ -34,6 +34,204 @@ from vss_ctx_rag.functions.summarization.vlm_structured import (
 # =============================================================================
 
 
+class TestEventTimestampParsing:
+    """Tests for video-relative timestamp conversion to seconds."""
+
+    @pytest.mark.parametrize(
+        "timestamp,expected_seconds",
+        [
+            ("00:00", 0.0),
+            ("01:30", 90.0),
+            ("65:00", 3900.0),
+            ("00:01:30", 90.0),
+            ("02:03:04", 7384.0),
+            ("00:00:01.5", 1.5),
+            # Elapsed time, not wall clock: hours are not capped at 24.
+            ("24:00:00", 86400.0),
+            ("99:59:59", 359999.0),
+        ],
+    )
+    def test_converts_mm_ss_and_hh_mm_ss_to_seconds(self, timestamp, expected_seconds):
+        event = Event(
+            start_time=timestamp,
+            end_time=expected_seconds + 1,
+            type="test",
+            description="Timestamp conversion",
+        )
+
+        assert event.start_time == expected_seconds
+
+    @pytest.mark.parametrize(
+        "timestamp",
+        [
+            "00:60",
+            "01:60:00",
+            "1:02",
+            "1:02:03",
+            "-01:30",
+            "-01:00:00",
+            "01:-30",
+            "100:00:00",
+        ],
+    )
+    def test_rejects_invalid_or_incomplete_video_timestamps(self, timestamp):
+        with pytest.raises(ValueError, match="Cannot parse timestamp"):
+            Event(
+                start_time=timestamp,
+                end_time=10,
+                type="test",
+                description="Invalid timestamp",
+            )
+
+    @pytest.mark.parametrize("timestamp", ["00:60", "01:60:00"])
+    def test_out_of_range_components_report_the_range_violation(self, timestamp):
+        """Out-of-range fields fail loudly instead of falling back to ISO parsing."""
+        with pytest.raises(ValueError, match="must be < 60"):
+            Event(
+                start_time=timestamp,
+                end_time=10,
+                type="test",
+                description="Out of range timestamp",
+            )
+
+    @pytest.mark.parametrize("timestamp", [None, [], {}])
+    def test_rejects_non_numeric_non_string_timestamps(self, timestamp):
+        with pytest.raises(TypeError, match="Expected numeric, MM:SS, HH:MM:SS"):
+            Event(
+                start_time=timestamp,
+                end_time=10,
+                type="test",
+                description="Unsupported timestamp type",
+            )
+
+    def test_overlaps_when_mm_ss_ranges_overlap(self):
+        """Overlapping MM:SS events of the same type should be detected."""
+        event1 = Event(
+            start_time="01:00",
+            end_time="01:10",
+            type="motion",
+            description="Motion A",
+        )
+        event2 = Event(
+            start_time="01:05",
+            end_time="01:20",
+            type="motion",
+            description="Motion B",
+        )
+
+        # Overlap is 5 seconds (65-70), above default 0.1 threshold
+        assert event1.overlaps_with(event2, overlap_threshold=0.1, adjacent_threshold=4)
+        assert event2.overlaps_with(event1, overlap_threshold=0.1, adjacent_threshold=4)
+
+    def test_overlaps_when_hh_mm_ss_ranges_overlap(self):
+        """Overlapping HH:MM:SS events of the same type should be detected."""
+        event1 = Event(
+            start_time="00:01:00",
+            end_time="00:01:10",
+            type="fire",
+            description="Fire A",
+        )
+        event2 = Event(
+            start_time="00:01:05",
+            end_time="00:01:20",
+            type="fire",
+            description="Fire B",
+        )
+
+        assert event1.overlaps_with(event2, overlap_threshold=0.1, adjacent_threshold=4)
+
+    def test_overlaps_when_mm_ss_and_hh_mm_ss_are_mixed(self):
+        """Mixed MM:SS and HH:MM:SS formats should compare after conversion."""
+        event1 = Event(
+            start_time="00:01:00",
+            end_time="00:01:10",
+            type="alert",
+            description="Alert A",
+        )
+        event2 = Event(
+            start_time="01:05",
+            end_time="01:20",
+            type="alert",
+            description="Alert B",
+        )
+
+        assert event1.overlaps_with(event2, overlap_threshold=0.1, adjacent_threshold=4)
+
+    def test_adjacent_mm_ss_within_threshold(self):
+        """Adjacent MM:SS events within the gap threshold should match."""
+        event1 = Event(
+            start_time="02:00",
+            end_time="02:10",
+            type="person",
+            description="Person enters",
+        )
+        event2 = Event(
+            start_time="02:12",
+            end_time="02:20",
+            type="person",
+            description="Person exits",
+        )
+
+        # Gap is 2 seconds (132 - 130), threshold is 4
+        assert event1.overlaps_with(event2, overlap_threshold=0.1, adjacent_threshold=4)
+
+    def test_adjacent_hh_mm_ss_beyond_threshold(self):
+        """Adjacent HH:MM:SS events beyond the gap threshold should not match."""
+        event1 = Event(
+            start_time="00:02:00",
+            end_time="00:02:10",
+            type="person",
+            description="Person enters",
+        )
+        event2 = Event(
+            start_time="00:02:20",
+            end_time="00:02:30",
+            type="person",
+            description="Person exits",
+        )
+
+        # Gap is 10 seconds, threshold is 4
+        assert not event1.overlaps_with(
+            event2, overlap_threshold=0.1, adjacent_threshold=4
+        )
+
+    def test_touching_video_timestamp_boundaries(self):
+        """Events that touch exactly at MM:SS / HH:MM:SS boundaries are adjacent."""
+        event1 = Event(
+            start_time="00:00:50",
+            end_time="00:01:00",
+            type="traffic",
+            description="Jam starts",
+        )
+        event2 = Event(
+            start_time="01:00",
+            end_time="01:10",
+            type="traffic",
+            description="Jam continues",
+        )
+
+        assert event1.overlaps_with(event2, overlap_threshold=0.1, adjacent_threshold=4)
+
+    def test_different_types_with_video_timestamps_do_not_overlap(self):
+        """Different event types never overlap even with identical video times."""
+        event1 = Event(
+            start_time="01:00",
+            end_time="01:10",
+            type="fire",
+            description="Fire",
+        )
+        event2 = Event(
+            start_time="00:01:00",
+            end_time="00:01:10",
+            type="theft",
+            description="Theft",
+        )
+
+        assert not event1.overlaps_with(
+            event2, overlap_threshold=0.1, adjacent_threshold=4
+        )
+
+
 class TestEventOverlapsWith:
     """Tests for Event.overlaps_with() method."""
 
@@ -432,6 +630,167 @@ def create_vlm_structured_instance(
 
 class TestMergeSimilarEvents:
     """Tests for VlmStructuredSummarization._merge_similar_events() method."""
+
+    @pytest.mark.asyncio
+    async def test_merges_events_after_converting_video_timestamps_to_seconds(self):
+        instance = create_vlm_structured_instance(time_adjacent_threshold=4.0)
+        events = [
+            Event(
+                start_time="00:00:50",
+                end_time="00:01:00",
+                type="motion",
+                description="Motion starts",
+            ),
+            Event(
+                start_time="01:03",
+                end_time="01:10",
+                type="motion",
+                description="Motion continues",
+            ),
+        ]
+
+        result = await instance._merge_similar_events(events)
+
+        assert len(result) == 1
+        assert result[0].start_time == 50.0
+        assert result[0].end_time == 70.0
+        assert result[0].description == "Motion starts | Motion continues"
+
+    @pytest.mark.asyncio
+    async def test_merges_overlapping_hh_mm_ss_events(self):
+        """Overlapping HH:MM:SS events of the same type should merge."""
+        instance = create_vlm_structured_instance()
+        events = [
+            Event(
+                start_time="00:01:00",
+                end_time="00:01:10",
+                type="fire",
+                description="Fire starts",
+            ),
+            Event(
+                start_time="00:01:05",
+                end_time="00:01:20",
+                type="fire",
+                description="Fire spreads",
+            ),
+        ]
+
+        result = await instance._merge_similar_events(events)
+
+        assert len(result) == 1
+        assert result[0].start_time == 60.0
+        assert result[0].end_time == 80.0
+        assert "Fire starts" in result[0].description
+        assert "Fire spreads" in result[0].description
+
+    @pytest.mark.asyncio
+    async def test_merges_overlapping_mm_ss_events(self):
+        """Overlapping MM:SS events of the same type should merge."""
+        instance = create_vlm_structured_instance()
+        events = [
+            Event(
+                start_time="01:00",
+                end_time="01:10",
+                type="alert",
+                description="Alert A",
+            ),
+            Event(
+                start_time="01:05",
+                end_time="01:20",
+                type="alert",
+                description="Alert B",
+            ),
+        ]
+
+        result = await instance._merge_similar_events(events)
+
+        assert len(result) == 1
+        assert result[0].start_time == 60.0
+        assert result[0].end_time == 80.0
+
+    @pytest.mark.asyncio
+    async def test_does_not_merge_video_timestamps_beyond_adjacent_threshold(self):
+        """Video-timestamp events beyond the adjacency gap should stay separate."""
+        instance = create_vlm_structured_instance(time_adjacent_threshold=4.0)
+        events = [
+            Event(
+                start_time="00:01:00",
+                end_time="00:01:10",
+                type="motion",
+                description="Motion A",
+            ),
+            Event(
+                start_time="01:20",
+                end_time="01:30",
+                type="motion",
+                description="Motion B",
+            ),
+        ]
+
+        result = await instance._merge_similar_events(events)
+
+        # Gap is 10 seconds (80 - 70), threshold is 4
+        assert len(result) == 2
+        assert result[0].start_time == 60.0
+        assert result[1].start_time == 80.0
+
+    @pytest.mark.asyncio
+    async def test_does_not_merge_different_types_with_video_timestamps(self):
+        """Different types with overlapping video timestamps should not merge."""
+        instance = create_vlm_structured_instance()
+        events = [
+            Event(
+                start_time="01:00",
+                end_time="01:10",
+                type="fire",
+                description="Fire",
+            ),
+            Event(
+                start_time="00:01:05",
+                end_time="00:01:15",
+                type="theft",
+                description="Theft",
+            ),
+        ]
+
+        result = await instance._merge_similar_events(events)
+
+        assert len(result) == 2
+        assert {e.type for e in result} == {"fire", "theft"}
+
+    @pytest.mark.asyncio
+    async def test_chain_merges_mixed_video_timestamp_formats(self):
+        """A->B->C chain merge should work across MM:SS and HH:MM:SS formats."""
+        instance = create_vlm_structured_instance()
+        events = [
+            Event(
+                start_time="00:01:00",
+                end_time="00:01:10",
+                type="chain",
+                description="A",
+            ),
+            Event(
+                start_time="01:08",
+                end_time="01:18",
+                type="chain",
+                description="B",
+            ),
+            Event(
+                start_time="00:01:16",
+                end_time="00:01:26",
+                type="chain",
+                description="C",
+            ),
+        ]
+
+        result = await instance._merge_similar_events(events)
+
+        assert len(result) == 1
+        assert result[0].start_time == 60.0
+        assert result[0].end_time == 86.0
+        assert "A" in result[0].description
+        assert "B" in result[0].description
+        assert "C" in result[0].description
 
     @pytest.mark.asyncio
     async def test_merge_similar_events_empty_list(self):
