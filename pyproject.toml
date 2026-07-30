@@ -26,14 +26,14 @@ requires-python = ">=3.12"
 license-files = ["LICENSE", "LICENSE.3rdparty"]
 dependencies = [
   "openai==1.109.1",
-  "langchain_core>=1.0.1,<2.0.0",
+  "langchain_core>=1.5.1,<2.0.0",
   "langchain==1.2.15",
   "langchain-classic>=1.0.3",
   "langchain_community==0.4.1",
   "langchain_milvus==0.3.3",
   "langchain-openai>=1.0.0,<2.0.0",
   "langchain-experimental==0.4.1",
-  "langchain-nvidia-ai-endpoints==1.3.0",
+  "langchain-nvidia-ai-endpoints==1.4.3",
   "pymilvus>=2.6.0,<2.7.0",
   "pymilvus-model==0.3.2",
   "python-multipart==0.0.26",
@@ -56,7 +56,7 @@ dependencies = [
   "safetensors==0.5.3",
   "minio==7.2.15",
   "pyaml-env==1.2.2",
-  "bleach==6.3.0",
+  "bleach==6.4.0",
   "dataclass-wizard==0.27.0",
   "pdfplumber==0.11.9",
   "nvidia-rag==2.5.0",
@@ -116,7 +116,7 @@ override-dependencies = [
   "langchain>=1.2.15",
   # CVE-2024-52530 (markup injection). unstructured pins bleach<6.2.
   # Remove once unstructured>=0.19.
-  "bleach>=6.3.0",
+  "bleach>=6.4.0",
   # CVE-2024-36401 (arbitrary code exec via crafted tensor).
   # transformers pins safetensors<0.5. Remove once transformers>=4.58.
   "safetensors>=0.5.3",
@@ -133,7 +133,7 @@ override-dependencies = [
 constraint-dependencies = [
   # CVE-2024-11392 (unsafe deserialization). Via nvidia-rag/unstructured.
   # Remove once nvidia-rag or unstructured pull transformers>=4.57.6.
-  "transformers>=4.57.6",
+  "transformers>=5.14.1",
   # CVE-2024-12797 (X.509 verification bypass). Via Authlib/minio/urllib3.
   # Remove once Authlib/minio upgrade their cryptography pin.
   "cryptography>=46.0.7",
@@ -142,7 +142,7 @@ constraint-dependencies = [
   "nltk>=3.9.4",
   # CVE-2025-0938 (buffer overflow in image decode). Via unstructured/pdfplumber.
   # Remove once unstructured or pdfplumber pull Pillow>=12.2.0.
-  "Pillow>=12.2.0",
+  "Pillow>=12.3.0",
   # CVE-2024-55945 (PKCE bypass) + BDSA-2026-7419. Via minio.
   # Updated to >=1.7.2 for BDSA-2026-7419 (nSpect NSPECT-P1VD-WUVY). Remove once minio pulls Authlib>=1.7.2.
   "Authlib>=1.7.2",
