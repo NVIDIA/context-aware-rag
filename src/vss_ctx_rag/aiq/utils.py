@@ -141,7 +141,7 @@ def create_vss_ctx_rag_config(name: str):
 
         embedding_model_name: EmbedderRef
 
-        rerank_model_name: str = "nvidia/llama-3.2-nv-rerankqa-1b-v2"
+        rerank_model_name: str = "nvidia/llama-nemotron-rerank-vl-1b-v2"
         rerank_model_url: str = "https://integrate.api.nvidia.com/v1"
         rag_type: str = "vector-rag"  # or "graph-rag"
         chat_batch_size: int = 1
