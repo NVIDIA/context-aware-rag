@@ -89,7 +89,9 @@ class DbQueryFunc(Function):
 
                 query = state.get("query")
                 if query is None:
-                    raise ValueError("db_query requires a 'query' field in the call state")
+                    raise ValueError(
+                        "db_query requires a 'query' field in the call state"
+                    )
 
                 params: Optional[dict] = state.get("params")
                 if params is None:
