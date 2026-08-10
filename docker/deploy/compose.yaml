@@ -38,6 +38,28 @@ services:
               device_ids: ['${EMBEDDING_GPU_ID:-0}']
               capabilities: [gpu]
 
+  # Reranking NIM. Self-hosted rather than hosted: the pinned
+  # langchain-nvidia-ai-endpoints validates rerank models against its own
+  # registry, which predates this model, and the SDK cannot be upgraded without
+  # breaking the langchain-core pin.
+  reranker-nim:
+    container_name: reranker-nim
+    image: "nvcr.io/nim/nvidia/llama-nemotron-rerank-vl-1b-v2:2.3.0"
+    volumes:
+      - ${MODEL_DIRECTORY:-.}:/opt/nim/.cache
+    ports:
+      - "8003:8000"
+    environment:
+      NGC_API_KEY: ${NVIDIA_API_KEY:?"NVIDIA_API_KEY is required"}
+    shm_size: 16gb
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ['${RERANKER_GPU_ID:-0}']
+              capabilities: [gpu]
+
   vss-ctx-rag-retriever:
     image: ctx_rag
     build:
