@@ -17,8 +17,11 @@ summarization:
   enable: true
   method: "batch"
   llm:
-    model: nvidia/nemotron-3-nano-30b-a3b
+    model: nvidia/nemotron-3.5-lightning-30b-a3b
     base_url: https://integrate.api.nvidia.com/v1
+    extra_body:
+      chat_template_kwargs:
+        thinking: false
     max_tokens: 2048
     temperature: 0.2
     top_p: 0.7
@@ -49,8 +52,11 @@ chat:
     top_k: 25
     confidence_threshold: 0.0
   llm:
-    model: nvidia/nemotron-3-nano-30b-a3b
+    model: nvidia/nemotron-3.5-lightning-30b-a3b
     base_url: https://integrate.api.nvidia.com/v1
+    extra_body:
+      chat_template_kwargs:
+        thinking: false
     max_tokens: 2048
     temperature: 0.5
   embedding:
@@ -64,8 +70,11 @@ notification:
   enable: false
   endpoint: "http://127.0.0.1:60000/via-alert-callback"
   llm:
-    model: nvidia/nemotron-3-nano-30b-a3b
+    model: nvidia/nemotron-3.5-lightning-30b-a3b
     base_url: https://integrate.api.nvidia.com/v1
+    extra_body:
+      chat_template_kwargs:
+        thinking: false
     max_tokens: 2048
     temperature: 0.2
     top_p: 0.7
