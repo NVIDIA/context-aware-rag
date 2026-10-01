@@ -91,8 +91,6 @@ class VlmStructuredSummarization(VlmStructuredBase):
                     self.accumulated_events, start_time, end_time
                 )
 
-            await self._store_merged_events(events)
-
             # dense_captions_retrieval_latency is set inside _fetch_events_from_db
             # (db + Kafka mode only). In sse / db-without-Kafka mode it stays None,
             # so downstream distinguishes "disabled" (N/A) from "enabled" (a number).

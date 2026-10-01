@@ -63,6 +63,7 @@ functions:
       time_overlap_threshold: 0.1
       max_events_per_batch: 50
       enable_llm_merging: !ENV ${LVS_ENABLE_LLM_MERGING:false}
+      generate_video_summary: !ENV ${LVS_GENERATE_VIDEO_SUMMARY:true}
       # Optional prompt overrides (system messages). description_merge_prompt is
       # only used when enable_llm_merging / LVS_ENABLE_LLM_MERGING is enabled.
       # aggregation_prompt: |

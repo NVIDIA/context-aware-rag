@@ -308,7 +308,7 @@ Parameters:
 
 #### VLM Structured Summarization
 
-`vlm_structured_summarization` and `vlm_structured_summarization_online` parse structured VLM event JSON, merge overlapping/adjacent events, then produce a final narrative with an LLM.
+`vlm_structured_summarization` and `vlm_structured_summarization_online` parse structured VLM event JSON, merge overlapping/adjacent events, then optionally produce a final narrative with an LLM. Events are merged once per invocation; the stored events match the events returned in the result.
 
 ```yaml
 summarization:
@@ -318,6 +318,7 @@ summarization:
     time_adjacent_threshold: 4
     max_events_per_batch: 50
     enable_llm_merging: !ENV ${LVS_ENABLE_LLM_MERGING:false}
+    generate_video_summary: !ENV ${LVS_GENERATE_VIDEO_SUMMARY:true}
     aggregation_prompt: |
       Optional custom system prompt for final narrative aggregation.
     description_merge_prompt: |
@@ -337,6 +338,7 @@ Parameters:
 - `time_adjacent_threshold` (float): Optional. Maximum gap in seconds to merge adjacent events. Default: `4`.
 - `max_events_per_batch` (int): Optional. Max events batched for type-inference / processing. Default: `50`.
 - `enable_llm_merging` (bool): Optional. Enable LLM-based merging of adjacent same-type event descriptions. Default: `false`. Also enabled when `LVS_ENABLE_LLM_MERGING` is `true` / `1` / `yes`.
+- `generate_video_summary` (bool): Optional. Generate the final narrative (`video_summary`) from the merged events. When disabled, events are still merged and stored, and `video_summary` is an empty string. Default: `true`.
 - `aggregation_prompt` (str): Optional. System prompt for final event aggregation. When unset/empty, a built-in observational-report prompt is used. The user message always supplies events via `{input}`.
 - `description_merge_prompt` (str): Optional. System prompt for LLM description merging. Used **only** when LLM merging is enabled (`enable_llm_merging` or `LVS_ENABLE_LLM_MERGING`). When unset/empty, a built-in merge prompt is used. The user message always supplies `{event_type}` and `{descriptions}`.
 - `uuid` / `uuids`: Optional stream identifier(s).

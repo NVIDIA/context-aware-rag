@@ -126,6 +126,13 @@ class VlmStructuredParamsBase(BaseModel):
             "always provides {event_type} and {descriptions}."
         ),
     )
+    generate_video_summary: bool = Field(
+        default=True,
+        description=(
+            "Generate a final narrative from the merged events. Disable to retain "
+            "event merging and storage without the final LLM aggregation call."
+        ),
+    )
     kafka_enabled: bool = Field(
         default=False,
         description="When enabled, ES storage is handled externally by the kafka-consumer-service.",
@@ -274,6 +281,7 @@ class VlmStructuredBase(Function):
     time_adjacent_threshold: float
     max_events_per_batch: int
     enable_llm_merging: bool
+    generate_video_summary: bool
     kafka_enabled: bool
     filter_start_time: Optional[float]
     filter_end_time: Optional[float]
@@ -313,6 +321,9 @@ class VlmStructuredBase(Function):
         self.enable_llm_merging = self._as_bool(
             self.get_param("enable_llm_merging", default=False)
         ) or self._env_flag_enabled("LVS_ENABLE_LLM_MERGING")
+        self.generate_video_summary = self._as_bool(
+            self.get_param("generate_video_summary", default=True)
+        )
         self.kafka_enabled = self.get_param("kafka_enabled", default=False)
         _raw_start = self.get_param("start_time", default=None)
         _raw_end = self.get_param("end_time", default=None)
@@ -970,25 +981,23 @@ class VlmStructuredBase(Function):
 
     # ── Batch storage ───────────────────────────────────────────────────
 
-    async def _store_merged_events(self, events: List[Event]) -> None:
-        """Merge the given events and persist each batch to the database."""
-        if not events:
+    async def _store_merged_events(self, merged_events: List[Event]) -> None:
+        """Persist already-merged events without repeating LLM work."""
+        if not merged_events:
             logger.info("No events to process")
             return
 
-        logger.info(f"Processing {len(events)} events for storage")
+        logger.info(f"Processing {len(merged_events)} events for storage")
 
         if self.kafka_enabled:
             logger.info(
-                "Ready to merge %d events (merge deferred to caller, "
+                "Ready to persist %d merged events ("
                 "ES storage handled by kafka-consumer-service)",
-                len(events),
+                len(merged_events),
             )
             return
 
         with Metrics("VlmStructured/StoreMergedEvents", "green"):
-            merged_events = await self._merge_similar_events(events)
-
             multi = len(self.uuids) > 1
 
             grouped: dict[str, list[Event]] = {}
@@ -1076,7 +1085,7 @@ class VlmStructuredBase(Function):
         uuids: List[str],
         log_filename: str = "structured_events_metrics.json",
     ) -> dict:
-        """Merge *events*, aggregate via LLM, and populate *state* with the result JSON.
+        """Merge once, persist events, and build an optional final narrative.
 
         This is the shared tail of ``acall`` for both DB-backed and in-memory variants.
         """
@@ -1084,10 +1093,15 @@ class VlmStructuredBase(Function):
 
         if events:
             merged_events = await self._merge_similar_events(events)
+            await self._store_merged_events(merged_events)
 
-            aggregated_summary = await self._aggregate_events_with_llm(merged_events)
-            if not aggregated_summary.strip():
-                aggregated_summary = "No events detected"
+            aggregated_summary = ""
+            if self.generate_video_summary:
+                aggregated_summary = await self._aggregate_events_with_llm(
+                    merged_events
+                )
+                if not aggregated_summary.strip():
+                    aggregated_summary = "No events detected"
 
             events_list = [
                 {
