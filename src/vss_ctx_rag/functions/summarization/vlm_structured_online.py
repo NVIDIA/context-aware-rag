@@ -65,8 +65,6 @@ class VlmStructuredOnlineSummarization(VlmStructuredBase):
             end_time = state.get("end_time", self.filter_end_time)
             events = await self._fetch_events_from_db(uuids, start_time, end_time)
 
-            await self._store_merged_events(events)
-
             state = await self._build_result(
                 state,
                 events,

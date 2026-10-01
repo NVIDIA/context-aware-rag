@@ -126,6 +126,19 @@ class VlmStructuredParamsBase(BaseModel):
             "always provides {event_type} and {descriptions}."
         ),
     )
+    llm_merge_concurrency: int = Field(
+        default=4,
+        ge=1,
+        le=32,
+        description="Maximum concurrent LLM description merges across independent temporal groups.",
+    )
+    generate_video_summary: bool = Field(
+        default=True,
+        description=(
+            "Generate a final narrative from the merged events. Disable to retain "
+            "event merging and storage without the final LLM aggregation call."
+        ),
+    )
     kafka_enabled: bool = Field(
         default=False,
         description="When enabled, ES storage is handled externally by the kafka-consumer-service.",
@@ -274,6 +287,8 @@ class VlmStructuredBase(Function):
     time_adjacent_threshold: float
     max_events_per_batch: int
     enable_llm_merging: bool
+    llm_merge_concurrency: int
+    generate_video_summary: bool
     kafka_enabled: bool
     filter_start_time: Optional[float]
     filter_end_time: Optional[float]
@@ -313,6 +328,10 @@ class VlmStructuredBase(Function):
         self.enable_llm_merging = self._as_bool(
             self.get_param("enable_llm_merging", default=False)
         ) or self._env_flag_enabled("LVS_ENABLE_LLM_MERGING")
+        self.llm_merge_concurrency = self.get_param("llm_merge_concurrency", default=4)
+        self.generate_video_summary = self._as_bool(
+            self.get_param("generate_video_summary", default=True)
+        )
         self.kafka_enabled = self.get_param("kafka_enabled", default=False)
         _raw_start = self.get_param("start_time", default=None)
         _raw_end = self.get_param("end_time", default=None)
@@ -777,7 +796,7 @@ class VlmStructuredBase(Function):
         if not events:
             return events
 
-        merged_events = []
+        event_groups = []
         processed_indices = set()
 
         for i, event1 in enumerate(events):
@@ -821,32 +840,64 @@ class VlmStructuredBase(Function):
                         current_end = max(current_end, event2.end_time)
                         found_merge = True
 
-            if len(events_to_merge) == 1:
-                merged_events.append(event1)
-            else:
-                descriptions = [e.description for e in events_to_merge]
-                if self.enable_llm_merging:
-                    merged_description = await self._merge_descriptions_with_llm(
-                        current_type, descriptions
-                    )
-                else:
-                    merged_description = " | ".join(descriptions)
-                    logger.info(
-                        f"LLM merging disabled - using simple concatenation for '{current_type}' event"
+            event_groups.append(
+                (events_to_merge, current_start, current_end, current_type)
+            )
+
+        multi_event_groups = [group for group in event_groups if len(group[0]) > 1]
+
+        if self.enable_llm_merging:
+            semaphore = asyncio.Semaphore(self.llm_merge_concurrency)
+
+            async def merge_descriptions(events_to_merge, event_type):
+                descriptions = [event.description for event in events_to_merge]
+                async with semaphore:
+                    return await self._merge_descriptions_with_llm(
+                        event_type, descriptions
                     )
 
-                merged_event = Event(
+            tasks = [
+                asyncio.create_task(merge_descriptions(group[0], group[3]))
+                for group in multi_event_groups
+            ]
+            try:
+                merged_descriptions = await asyncio.gather(*tasks)
+            except BaseException:
+                for task in tasks:
+                    task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+                raise
+        else:
+            merged_descriptions = [
+                " | ".join(event.description for event in group[0])
+                for group in multi_event_groups
+            ]
+
+        merged_description_iter = iter(merged_descriptions)
+        merged_events = []
+        for events_to_merge, current_start, current_end, current_type in event_groups:
+            if len(events_to_merge) == 1:
+                merged_events.append(events_to_merge[0])
+                continue
+
+            merged_description = next(merged_description_iter)
+            if not self.enable_llm_merging:
+                logger.info(
+                    f"LLM merging disabled - using simple concatenation for '{current_type}' event"
+                )
+            merged_events.append(
+                Event(
                     start_time=current_start,
                     end_time=current_end,
                     type=current_type,
                     description=merged_description,
                     uuid=events_to_merge[0].uuid,
                 )
-                merged_events.append(merged_event)
-                logger.info(
-                    f"Merged {len(events_to_merge)} events of type '{current_type}' "
-                    f"into single event: {merged_description[:100]}..."
-                )
+            )
+            logger.info(
+                f"Merged {len(events_to_merge)} events of type '{current_type}' "
+                f"into single event: {merged_description[:100]}..."
+            )
 
         logger.info(f"Merged {len(events)} events into {len(merged_events)} events")
         merged_events.sort(key=lambda event: event.start_time)
@@ -970,25 +1021,23 @@ class VlmStructuredBase(Function):
 
     # ── Batch storage ───────────────────────────────────────────────────
 
-    async def _store_merged_events(self, events: List[Event]) -> None:
-        """Merge the given events and persist each batch to the database."""
-        if not events:
+    async def _store_merged_events(self, merged_events: List[Event]) -> None:
+        """Persist already-merged events without repeating LLM work."""
+        if not merged_events:
             logger.info("No events to process")
             return
 
-        logger.info(f"Processing {len(events)} events for storage")
+        logger.info(f"Processing {len(merged_events)} events for storage")
 
         if self.kafka_enabled:
             logger.info(
-                "Ready to merge %d events (merge deferred to caller, "
+                "Ready to persist %d merged events ("
                 "ES storage handled by kafka-consumer-service)",
-                len(events),
+                len(merged_events),
             )
             return
 
         with Metrics("VlmStructured/StoreMergedEvents", "green"):
-            merged_events = await self._merge_similar_events(events)
-
             multi = len(self.uuids) > 1
 
             grouped: dict[str, list[Event]] = {}
@@ -1076,7 +1125,7 @@ class VlmStructuredBase(Function):
         uuids: List[str],
         log_filename: str = "structured_events_metrics.json",
     ) -> dict:
-        """Merge *events*, aggregate via LLM, and populate *state* with the result JSON.
+        """Merge once, persist events, and build an optional final narrative.
 
         This is the shared tail of ``acall`` for both DB-backed and in-memory variants.
         """
@@ -1084,10 +1133,15 @@ class VlmStructuredBase(Function):
 
         if events:
             merged_events = await self._merge_similar_events(events)
+            await self._store_merged_events(merged_events)
 
-            aggregated_summary = await self._aggregate_events_with_llm(merged_events)
-            if not aggregated_summary.strip():
-                aggregated_summary = "No events detected"
+            aggregated_summary = ""
+            if self.generate_video_summary:
+                aggregated_summary = await self._aggregate_events_with_llm(
+                    merged_events
+                )
+                if not aggregated_summary.strip():
+                    aggregated_summary = "No events detected"
 
             events_list = [
                 {
