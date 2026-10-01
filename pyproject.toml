@@ -130,7 +130,7 @@ override-dependencies = [
     "joserfc==1.7.4",
     "langgraph-sdk==0.4.2",
     "mcp==1.29.0",
-    "mistune==3.3.0",
+    "mistune==3.3.4",
 ]
 # Constrain transitive deps to CVE-safe minimums (nSpect bug 6037840).
 # These are not direct deps — pulled in transitively.
