@@ -612,6 +612,7 @@ def create_vlm_structured_instance(
     instance.time_overlap_threshold = time_overlap_threshold
     instance.time_adjacent_threshold = time_adjacent_threshold
     instance.enable_llm_merging = enable_llm_merging
+    instance.llm_merge_concurrency = 4
     instance.accumulated_events = []
 
     # Mock the LLM description merge method to simulate LLM behavior
